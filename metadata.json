@@ -1,0 +1,6 @@
+{
+  "name": "AR/OS",
+  "description": "AR/OS personal offline-first operating system and AR SOS safety module",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

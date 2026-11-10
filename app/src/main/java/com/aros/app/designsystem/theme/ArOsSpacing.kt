@@ -1,0 +1,28 @@
+package com.aros.app.designsystem.theme
+
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * AR/OS 4dp spacing grid tokens.
+ */
+@Immutable
+data class ArOsSpacing(
+    val xxs: Dp = 4.dp,
+    val xs: Dp = 8.dp,
+    val sm: Dp = 12.dp,
+    val md: Dp = 16.dp,
+    val lg: Dp = 20.dp,
+    val xl: Dp = 24.dp,
+    val xxl: Dp = 32.dp,
+    val xxxl: Dp = 40.dp,
+    val screenMargin: Dp = 20.dp,
+    val sectionGap: Dp = 28.dp,
+    val itemGap: Dp = 12.dp,
+    val rowMinHeight: Dp = 52.dp,
+    val minTouchTarget: Dp = 48.dp
+)
+
+val LocalArOsSpacing = staticCompositionLocalOf { ArOsSpacing() }

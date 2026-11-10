@@ -1,0 +1,477 @@
+# AR/OS — UI/UX Transformation Master Prompt
+Target: Google AI Studio → Build mode → the EXISTING AR/OS Android project (Kotlin + Jetpack Compose)
+
+**Attach to this same message:** REF-1 (AR/OS visual identity / design-language image) and REF-2 (multi-screen AR/OS concept image). They are inspiration, not pixel targets.
+
+---
+
+## 0. HOW YOU MUST WORK (read this first)
+
+You are a senior Android UI engineer and product designer. Your job is to APPLY a premium design and motion system to the existing AR/OS app by IMPLEMENTING it in code, not by describing it.
+
+- The design and technical decisions below were researched against official Android documentation. Do not re-research them, do not offer alternatives, do not ask clarifying questions. If something is unspecified, choose the safest option consistent with this document and list it under "Assumptions" in the report.
+- This is a **presentation-layer change only**. Behaviour is frozen (Section 8). If something looks broken or incomplete, record it under "Pre-existing issues found" and do NOT silently change its behaviour.
+- Work in the stages of Section 10, in order. The project must build after every stage. Stop and fix any build break before continuing.
+- NEVER fake anything: no demo data where real data exists, no static mockups replacing working screens, no claims that the app "feels smooth" or "runs at 60 FPS". The browser emulator cannot prove performance, haptics, TalkBack behaviour, or lock-screen behaviour. Report those as "NOT VERIFIED — requires physical device".
+- If AI Studio's Android build blocks something this document requires (a dependency that will not resolve, a resource type, a manifest attribute), STOP at that point and say exactly what is blocked and why. Do not silently replace the design.
+- Do not rewrite the project. Touch only the files you must, and list every file you touch.
+- Do not generate image assets, illustrations, or Lottie animations. Everything is drawn with Compose, vector icons, and typography.
+- If REF-1 / REF-2 are NOT attached to this message, say so in your first line, do NOT invent a palette, continue with the app's existing colour roles, and mark colour work as incomplete in the report.
+
+---
+
+## 1. PROJECT UNDERSTANDING
+
+**AR/OS** is a personal, offline-first, local-data-first Android "personal operating system": one app to manage time, phone habits, focus, routines, discipline and personal safety. Built by one person, for their own phone (Motorola Moto G57 Power, 120 Hz display, Android 16 expected — confirm in the report if the project exposes it; do not guess).
+
+Existing systems (some may still be placeholders — inspect to find out):
+1. **Routine Engine** — flexible daily activities and routines.
+2. **Digital Guardian** — distraction control and app restrictions.
+3. **Focus Engine** — focus sessions and task-starting help.
+4. **Phone Activity Ledger** — phone usage and screen-activity history.
+5. **AR SOS** — emergency trigger (Volume Down ×5), trusted contacts, countdown screen, event log, readiness status.
+6. **Discipline Engine** — habit tracking and daily progress.
+7. **Adaptive Intelligence** — offline behavioural analysis and suggestions.
+Plus **AR/OS Core**, which coordinates them.
+
+The app is single-activity, single-module, Material 3 + Compose, with ViewModels, Room, DataStore, services and receivers. The earlier AR SOS work used packages like `shell/`, `core/`, `feature/sos/{domain,data,platform,ui}` — **verify the real structure in Stage 0; do not assume it.**
+
+**This task:** give AR/OS a premium, cohesive, iOS-inspired visual language and interaction quality, natively in Compose, WITHOUT changing what the app does. The interface must feel like ONE product, not seven mini-apps stapled together. The final result must be visually redesignable in future without touching feature logic.
+
+---
+
+## 2. VISUAL DIRECTION (what "premium" means in practical terms)
+
+### 2.1 Intent
+Sophisticated, mature, calm, precise. The craftsmanship of excellent iOS apps — refined type, disciplined spacing, quiet surfaces, purposeful glass — implemented as a proper native Android app. A serious personal operating system.
+
+### 2.2 Practical, testable rules
+1. **Hierarchy comes from type, size, weight and space — not from boxes.** Do not wrap everything in cards. Use inset-grouped lists (rows inside one rounded group, separated by hairlines) for settings/lists; use a standalone card only for a genuinely self-contained object (a session, a status, a summary).
+2. **One primary action per screen**, visually dominant and always in the same place per screen type.
+3. **Three surface levels only:** base, raised, overlay. Separate levels with tonal steps and a hairline border (`Dp.Hairline`). Soft shadows only on true floating overlays (sheets, menus, dialogs). No stacked shadows, no heavy elevation.
+4. **Spacing on a 4 dp grid**; one screen-edge margin everywhere; consistent section gaps. Tune density to be comfortable, not cramped, not sparse.
+5. **Consistent shape language** (Section 6.2 radii). No mixing of sharp and pill-shaped controls in one context.
+6. **Colour is semantic, not decorative.** One accent colour plus semantic states (success / warning / danger / info). Modules are distinguished by icon + title, NOT by per-module colour themes. Colourful decoration must never become the identity.
+7. **Gradients:** none by default. Use one only if it is clearly present in REF-1/REF-2 AND subtle AND functional. Never as decoration.
+8. **Glass/material** is limited and purposeful (Section 7.5). Never on the SOS countdown screen.
+9. **Icons:** one family, one visual weight, one style (outline OR filled for a given context — never mixed). Sizes 20 dp (inline/rows) and 24 dp (bars/actions). Tint with semantic tokens. Icons support text; they never replace labels for important actions.
+10. **Every screen has designed empty, error and confirmation states** — in the same language as the rest of the app, using real state, not fake data.
+11. **Nothing is added for decoration.** If an element does not carry information or affordance, remove it.
+
+### 2.3 Anti-patterns (do NOT produce)
+Cartoon or toy-like controls; children's-app aesthetics; chunky rounded buttons with drop shadows; rainbow module colours; generic "AI dashboard" tile grids; cards inside cards; decorative blobs, orbs, glows; gradient buttons; emoji as icons; default Material 3 look left unthemed; boxed-everything layouts; tiny low-contrast grey text.
+
+### 2.4 Colour (do NOT invent a palette)
+- Derive colour ROLES and relationships from REF-1 and REF-2 and from the app's existing theme. Express them only as **semantic tokens** (names below). Never hard-code colour literals inside screens or components.
+- Preserve the existing appearance preference (**System / Light / Dark**) exactly as the app already stores and applies it. Find how it works in Stage 0 and keep that wiring.
+- If the references show only one mode, build the other by preserving relationships (surface step order, text contrast, accent behaviour) — not by naive inversion. State what you did in the report.
+- Token names (roles only): `background`, `surface`, `surfaceRaised`, `surfaceOverlay`, `contentPrimary`, `contentSecondary`, `contentTertiary`, `contentOnAccent`, `accent`, `accentPressed`, `separator`, `hairline`, `scrim`, `success`, `warning`, `danger`, `info`, `glassFill`, `glassBorder`, `focusRing`, plus `sosCritical` for the countdown screen.
+- Verify contrast per token pair in both modes: 4.5:1 for normal text, 3:1 for large text and essential UI components (WCAG guidance referenced by Android's accessibility docs).
+
+---
+
+## 3. TYPOGRAPHY (a priority)
+
+### 3.1 Decision (evaluated, not just admired)
+Candidates considered: **Satoshi, General Sans, Switzer** (Fontshare), with an open-licence fallback.
+- All three ship under the **ITF Free Font License**: free for personal and commercial use, including apps; **no modification, no redistribution, no extraction of the font files**. Do NOT subset, convert, rename or edit the font files. For this personal sideloaded app that is fine; **re-read the licence on fontshare.com before any public distribution.**
+- Satoshi: variable file with a continuous weight axis (so 600 is available), tabular figures supported (needed for timers and stats). A secondary review says it performs well at medium-to-large sizes and does not claim small-text strength.
+- General Sans / Switzer: neo-grotesque, variable; tabular-figure support was NOT confirmed in my research.
+- **Decision:** a two-role system with ONE swap point each — `ArOsFontDisplay` (large title, titles, numerals) and `ArOsFontText` (body, callout, footnote, caption). Both start as **Satoshi Variable**. If on-device testing shows Satoshi weak at 12–15 sp, swap only `ArOsFontText` to Switzer. Nothing else changes.
+
+### 3.2 Font files are NOT in the project yet
+You cannot download font files. Therefore:
+- Create `Type.kt` with `ArOsFontDisplay` and `ArOsFontText` currently set to `FontFamily.Default`, plus the **complete, commented-out wiring block** below, so wiring fonts later is a copy-paste.
+- Do NOT reference any `R.font.*` that does not exist (it would break the build).
+- Put a plain-language "How to add the fonts" section (5 beginner steps) in `docs/AR_OS_DESIGN_SYSTEM.md` and in the report: download Satoshi Variable from Fontshare → rename to lowercase with underscores (e.g. `satoshi_variable.ttf`) → place in `app/src/main/res/font/` → uncomment the block → build.
+- Downloadable (Google Play) fonts are REJECTED: they need network access and Play services, and the official docs state variable fonts are not supported via downloadable fonts. The app is offline-first and requests no INTERNET permission.
+
+```kotlin
+// REFERENCE SKETCH — Type.kt (resolve imports yourself; compile-fix as needed)
+// Pattern from the official "Work with fonts" doc: one Font() entry per weight, each with
+// explicit variation settings. Variable fonts need API 26+ (minSdk is 29, so no guard needed;
+// if the project's minSdk is lower, guard with Build.VERSION.SDK_INT >= Build.VERSION_CODES.O).
+// The official example wraps FontVariation in @OptIn(ExperimentalTextApi::class); add that opt-in only if your Compose version still requires it.
+// ALWAYS declare the weight explicitly: a variable file otherwise renders at its default axis value.
+val ArOsFontDisplay: FontFamily = FontFamily.Default   // SWAP POINT 1
+val ArOsFontText: FontFamily = FontFamily.Default      // SWAP POINT 2
+
+/* WIRING BLOCK — enable after the files exist in res/font:
+val SatoshiVariable = FontFamily(
+    Font(R.font.satoshi_variable, FontWeight.Normal,   variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.satoshi_variable, FontWeight.Medium,   variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.satoshi_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.satoshi_variable, FontWeight.Bold,     variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+)
+val ArOsFontDisplay = SatoshiVariable
+val ArOsFontText = SatoshiVariable
+*/
+```
+
+### 3.3 Type scale (sp / line height; roles, not Material names)
+| Role | Size / line | Weight | Use |
+|---|---|---|---|
+| `largeTitle` | 34 / 40 | 700 | collapsing screen titles; letter-spacing about −0.4 sp |
+| `title1` | 28 / 34 | 700 | section-level titles; about −0.3 sp |
+| `title2` | 22 / 28 | 600 | sheet and card titles |
+| `headline` | 17 / 22 | 600 | row titles, button labels |
+| `body` | 16 / 24 | 400 | primary reading text |
+| `callout` | 15 / 22 | 400–500 | secondary content |
+| `subhead` | 14 / 20 | 400 | supporting text |
+| `footnote` | 13 / 18 | 400 | metadata |
+| `caption` | 12 / 16 | 500 | smallest allowed (never below 12 sp) |
+| `numericDisplay` | 56 / 60 | 500 | focus timer; tabular |
+| `numericTitle` | 28 / 32 | 600 | key stats; tabular |
+| `numericBody` | 16 / 24 | 500 | table/list figures; tabular |
+
+- All `numeric*` roles set `fontFeatureSettings = "tnum"` so digits do not jitter when they change. **Verify in the design gallery** that digit width really is constant once the font is wired; if it is not, say so in the report.
+- All sizes in `sp`. Never fix a container height around text. Test at 85 %, 100 %, 130 % and 200 % font scale.
+- Titles use `ArOsFontDisplay`; everything else `ArOsFontText`; numeric roles use `ArOsFontDisplay`.
+
+---
+
+## 4. INTERACTION AND MOTION PHILOSOPHY
+
+Motion must communicate relationships (where something came from, what changed) and make the app feel responsive. It must never exist to show off, and must never slow everyday actions.
+
+### 4.1 Rules
+1. **Springs for anything the user touches or that can be interrupted** (official guidance: springs preserve velocity when the target changes; tweens respond less smoothly to interruption). **Tweens only for fades and fixed-duration colour/alpha changes.**
+2. **Critically-damped by default** (`DampingRatioNoBouncy`). A tiny overshoot (`DampingRatioLowBouncy`) is allowed ONLY on gesture release (sheet fling, drag release). No bouncy, wobbly or cartoon motion anywhere.
+3. **Fast in, faster out:** exits are shorter than entrances.
+4. **One thing moves at a time** per interaction where possible. No staggered "showpiece" entrances on everyday screens.
+5. **No infinite animations**, with one exception: a loading indicator while something is genuinely loading, which must stop under reduced motion.
+6. **No animation on first-frame critical paths** (app open, SOS countdown screen).
+7. Animations are driven by UI state only; business logic is never touched or delayed by an animation.
+
+### 4.2 Motion table
+| Interaction | Specification |
+|---|---|
+| Press on tappable surface/row/button | Scale to 0.97 with `snappy` spring on press, back on release/cancel. No ripple. Applied app-wide through one `Indication` (Section 7.3). |
+| Toggle / switch / segmented selection | `snappy` spring on the thumb/indicator; selection haptic (Section 4.4). |
+| Screen push (forward) | Incoming: slide in from about 25 % of width + fade in. Outgoing: slide about 15 % left + fade out. `standard` spring (settles in roughly 0.3 s — my calculation for a critically damped spring with stiffness 400, confirm by feel). |
+| Screen pop (back) | Mirror of push. Predictive back must keep working (Section 9). |
+| Top-level tab switch | Cross-fade + 2 % scale only. NEVER slide between top-level tabs. |
+| Expand / collapse (rows, cards) | `Modifier.animateContentSize(standard spring)`; inner content fades with `fadeIn/fadeOut`. |
+| List item insert / remove / reorder | `Modifier.animateItem()` with stable keys. |
+| Bottom sheet / dialog | Sheet: system drag, `release` spring on fling settle; scrim fades with tween. Dialog: fade + 4 % scale-in. |
+| Number text changes (static label) | Plain text swap. Do NOT animate every digit of a ticking timer. |
+| Progress ring / bar | Draw-phase animation; one linear animation driven by real elapsed time; state read inside the draw lambda, not in composition. |
+| Appear / disappear of content | `AnimatedVisibility` with fade + small vertical slide. |
+| Success / error feedback | Haptic + brief colour/state change. No shake, no confetti. |
+
+### 4.3 Reduced motion
+Compose animations follow the system animation-duration scale (the "Remove animations" accessibility option sets it to 0) according to the community write-up I found; **verify on the emulator with animations off.** In addition, implement `rememberReducedMotion()` (Section 7.4) and use it so that, when reduced: screen transitions become a plain cross-fade, press-scale and decorative motion are removed, and nothing loops.
+
+### 4.4 Haptics (restrained)
+Use haptics only on: selection change (segmented control, tab), toggle on/off, confirmation (completing a focus session or routine task, saving a contact), rejection (invalid input, blocked action). NEVER on scroll, on every tap, or on loading. Use one helper (Section 7.4). **SOS-trigger vibration is a platform-layer behaviour — do not touch it.**
+
+### 4.5 Safety-critical surfaces
+The AR SOS countdown screen, readiness status, and anything shown over the lock screen get the plainest, fastest treatment: no blur, no glass, no entrance delay, maximum contrast, 56 dp+ touch targets, Cancel visually dominant, status communicated by text + icon + colour (never colour alone).
+
+---
+
+## 5. RESEARCH FINDINGS THAT SHAPE THE IMPLEMENTATION
+
+Status key: **STABLE** = documented by Android. **OPTIONAL** = use only if it helps. **VERSION-DEPENDENT** = check the project's library versions. **AVOID** = do not use. **UNVERIFIED** = I could not confirm it in my sources; the compiler / device decides.
+
+| # | Topic | Decision | Status | Source |
+|---|---|---|---|---|
+| 1 | Choosing animation APIs | `AnimatedVisibility` (appear/disappear), `AnimatedContent`/`Crossfade` (switch content outside Navigation), `animate*AsState` (independent properties), `updateTransition` (properties that must move together), `Animatable` (gesture-driven / staggered), `animateContentSize` (size), `animateItem()` (list placement), `TextMotion.Animated` only when animating text size/position | STABLE (decision tree last updated 2026-10-30) | [Choose an animation API](https://developer.android.com/develop/ui/compose/animation/choose-api) |
+| 2 | Spring vs tween | Springs for touch-driven/interruptible motion (default spec of most APIs, keeps velocity on retarget); tween for fades and fixed timing | STABLE | [Customize animations](https://developer.android.com/develop/ui/compose/animation/customize) |
+| 3 | Navigation transitions | Keep the project's existing navigation. With Navigation Compose use per-destination `enterTransition/exitTransition/popEnterTransition/popExitTransition`; without it use `AnimatedContent`. **Do NOT migrate to Navigation 3 during a visual redesign** (Navigation 3 is stable, 1.2.0 as of 23 Sep 2026, but migration is a functional change). | STABLE | [Choose an animation API](https://developer.android.com/develop/ui/compose/animation/choose-api), [Navigation 3 releases](https://developer.android.com/jetpack/androidx/releases/navigation3) |
+| 4 | Shared elements | OPTIONAL, at most ONE hero transition (Core module card → module screen) and only if navigation already uses `NavHost` or `AnimatedContent`. Use `sharedBounds` (not `sharedElement`) for containers/text. They do NOT work across `Dialog`/`ModalBottomSheet`. The docs page does not state a stability level; I believe they are stable from Compose 1.7 (**UNVERIFIED** — your compiler/opt-in warnings decide). If it causes any dropped frame or opt-in friction, skip it. | OPTIONAL / UNVERIFIED | [Shared element transitions](https://developer.android.com/jetpack/compose/animation/shared-elements) |
+| 5 | Press feedback | Custom `IndicationNodeFactory` (scale on press). Needs `foundation` 1.7.0+. `rememberRipple()` and `RippleTheme` are deprecated; Material 1.7+/M3 1.3+ no longer read `LocalRippleTheme`. | STABLE (VERSION-DEPENDENT: foundation ≥ 1.7.0) | [Migrate to Indication and Ripple APIs](https://developer.android.com/jetpack/compose/touch-input/user-interactions/migrate-indication-ripple) |
+| 6 | Recomposition and frame cost | Stable `key` + `contentType` in lazy lists; `remember` only for genuinely expensive work; `derivedStateOf` to limit recomposition on fast-changing state (`computedStateOf` is the newer option on Compose Runtime 1.13+ only); read frequently-changing state in lambda modifiers (`offset { }`, `graphicsLayer { }`, `drawBehind { }`) so composition is skipped; never write state after reading it in composition | STABLE (`computedStateOf`: VERSION-DEPENDENT) | [Follow best practices](https://developer.android.com/develop/ui/compose/performance/bestpractices) |
+| 7 | Frame budgets | 16 ms at 60 Hz, 11 ms at 90 Hz, 8 ms at 120 Hz; overrunning drops the frame. Test a release/non-debuggable build. Moto G57 Power has a 120 Hz panel and a mid-range chip, so heavy effects have real cost. | STABLE | [Slow rendering](https://developer.android.com/topic/performance/vitals/jank), [Moto G57 Power launch](https://www.croma.com/unboxed/moto-g57-power-launched-india-price-specifications) |
+| 8 | Baseline profiles | Compose ships its own profile; an app-level profile needs a separate Macrobenchmark module, which **AI Studio's single-module Android builds cannot hold**. Deferred to Android Studio; optional. | OPTIONAL | [Baseline profiles for Compose](https://developer.android.com/develop/ui/compose/performance/baseline-profiles) |
+| 9 | Backdrop blur (glass) | Real backdrop blur needs Android 12+ (API 31); below that, a translucent scrim. Third-party **Haze** is the only blur library considered. **Its API changed in 2.x** (`rememberHazeState()`, `Modifier.hazeSource(state)`, `Modifier.hazeBlur(input, style)`, `HazeMaterials.thin()`; older 1.x names `hazeChild/hazeEffect` are gone). Its docs say nothing about performance cost. Its native window-backdrop path is experimental and needs Android 17+: **AVOID, never set `HazeFeatureFlags.isPlatformBackdropEnabled`.** | OPTIONAL (VERSION-DEPENDENT; EXPERIMENTAL path AVOID) | [Haze FAQ](https://chrisbanes.github.io/haze/faq), [Haze blur usage](https://chrisbanes.github.io/haze/latest/blur/usage/) |
+| 10 | Fonts | Bundle in `res/font`, lowercase file names, variable fonts need API 26+; declare `FontVariation.weight` per entry; variable fonts not supported via downloadable fonts; `fontFeatureSettings` is not covered on the fonts page (**UNVERIFIED**; `TextStyle(fontFeatureSettings = "tnum")` is my understanding of the API — the compiler decides). | STABLE / UNVERIFIED for tnum | [Work with fonts](https://developer.android.com/develop/ui/compose/text/fonts) |
+| 11 | Font licensing | ITF Free Font License v1.0: apps/mobile use allowed, free commercial use; no modification, redistribution or extraction. Read via a third-party copy of the licence and the foundry's announcement — confirm on fontshare.com. | STABLE / confirm at source | [ITF FFL text (third-party copy)](https://github.com/ariqnrnns/zauberhaft-gatsby/blob/main/Font%20License.txt), [ITF announcement](https://www.indiantypefoundry.com/news/introducing-fontshare), [Satoshi review](https://fontalternatives.com/fonts/satoshi/) |
+| 12 | Edge-to-edge | Enforced for apps targeting API 35; for API 36 the opt-out attribute is disabled. Use `enableEdgeToEdge()`, `Scaffold`/`safeDrawing` insets, `contentPadding` (not `Modifier.padding`) on lazy lists so content scrolls under bars, `consumeWindowInsets` to avoid double padding. | STABLE | [Android 16 behaviour changes](https://developer.android.com/about/versions/16/behavior-changes-16), [Insets in Compose](https://developer.android.com/develop/ui/compose/layouts/insets) |
+| 13 | Predictive back | For apps targeting API 36 on Android 16, `onBackPressed` and `KEYCODE_BACK` are no longer delivered; use `BackHandler`/`PredictiveBackHandler` or Navigation's built-in handling. Do NOT use the manifest opt-out. | STABLE | [Android 16 behaviour changes](https://developer.android.com/about/versions/16/behavior-changes-16) |
+| 14 | Accessibility | Touch targets about 48 dp (`minimumInteractiveComponentSize()` for small visuals), `sp` text, contrast 4.5:1 / 3:1, meaningful `contentDescription`, `Role`, `stateDescription`, `mergeDescendants`, custom actions for gesture-only features, check traversal order, test with TalkBack. (The overview page does not itself state the numbers; they come from WCAG/Android guidance.) | STABLE | [Compose accessibility key steps](https://developer.android.com/develop/ui/compose/accessibility/key-steps) |
+| 15 | Reduced motion | Read `Settings.Global.ANIMATOR_DURATION_SCALE`; 0 = reduced motion; built-in Compose animations respect it (community source — verify). | UNVERIFIED (community source) | [Android animations and reduced motion](https://dev.to/eevajonnapanula/android-animations-and-reduced-motion-2em2) |
+| 16 | Haptic constants | Use platform `HapticFeedbackConstants` via `View.performHapticFeedback`. `CONFIRM`/`REJECT` (API 30) and `TOGGLE_ON/OFF`, `SEGMENT_TICK` (API 34) are from my knowledge of the platform; **I could not confirm the API levels in my sources**, so guard with `Build.VERSION.SDK_INT` and let the compiler confirm. | UNVERIFIED | — |
+| 17 | Compose BOM / Kotlin | Do NOT upgrade BOM, Kotlin or AGP unless a listed API needs it; if you must, report exact versions. Compose compiler = Kotlin plugin version on Kotlin 2.0+. | STABLE | [Compose BOM](https://developer.android.com/develop/ui/compose/bom) |
+| 18 | AI Studio limits | Single-activity, single-module, Compose-only, client-side only, ZIP export only. | STABLE | [AI Studio Android Build](https://ai.google.dev/gemini-api/docs/aistudio-android) |
+
+**Rejected on purpose:** Navigation 3 migration; Lottie; Accompanist; any animation or UI library beyond Section 6.4; `Modifier.blur()` on text-bearing or scrolling content; `rememberInfiniteTransition` for decoration; Haze's platform-backdrop flag; downloadable fonts; per-module colour themes.
+
+---
+
+## 6. DESIGN-SYSTEM AND COMPONENT REQUIREMENTS
+
+Build ONE reusable foundation. Do not style screens one by one. Avoid over-engineering: build only what the inspected screens actually need.
+
+### 6.1 Structure (single module; use the project's real root package, shown as `<root>`)
+```
+<root>/designsystem/
+  theme/       ArOsTheme (wraps MaterialTheme), ArOsColors, ArOsTypography, ArOsSpacing, ArOsShapes, ArOsElevation, ArOsIcons
+  motion/      ArOsMotion, PressIndication, ReducedMotion, ScreenTransitions
+  haptics/     ArOsHaptics
+  components/  (Section 6.3)
+  gallery/     ArOsDesignGallery (Section 6.5)
+```
+- The design system imports NOTHING from feature `domain/`, `data/` or `platform/` packages. Features import the design system, never the reverse.
+- Tokens are exposed through `CompositionLocal`s (e.g. `ArOsTheme.colors.contentPrimary`) and are ALSO mapped into `MaterialTheme` colour scheme / typography / shapes so that remaining Material 3 components (text fields, switches, sheets, dialogs) inherit the look.
+- Provide `LocalIndication` with the press-scale indication at the theme root so every `clickable` picks up the same feedback. Material 3 1.3.0+ no longer reads `LocalRippleTheme`, so do NOT try to restyle ripples that way. Check which Material components actually honour `LocalIndication`; where one still shows a ripple, replace it with the design-system equivalent and note it in the report.
+
+### 6.2 Tokens
+- **Spacing (4 dp grid):** 4, 8, 12, 16, 20, 24, 32, 40, 56. Screen horizontal margin 20 dp. Section gap 28–32 dp. List row minimum height 52–56 dp. Touch target ≥ 48 dp.
+- **Radii:** small 8, control 12, field 14, group/card 20, sheet-top 28, pill = full. Use `RoundedCornerShape`; do not add shape libraries.
+- **Surfaces:** `base`, `raised`, `overlay` (Section 2.2). Hairline = `Dp.Hairline`.
+- **Icons:** one family. If the project already depends on an icon set, keep it and use it consistently; otherwise use the smallest set that compiles. I could not confirm whether `material-icons-extended` is still actively maintained, so do not add it only for this task. Sizes 20/24 dp.
+- **Motion:** `ArOsMotion` (Section 7.1).
+
+### 6.3 Components (build only those the inspected screens need; every one has default / pressed / focused / disabled / selected / error / loading states where applicable)
+`ArOsScreenScaffold` (edge-to-edge; collapsing large title) · `ArOsSectionHeader` · `ArOsGroup` + `ArOsRow` (inset-grouped list row: leading icon, title, supporting text, trailing value/chevron/toggle) · `ArOsCard` · `ArOsButton` (primary / secondary / text / destructive) · `ArOsIconButton` · `ArOsSegmentedControl` · `ArOsToggleRow` · `ArOsChip` · `ArOsStatusPill` (used for SOS readiness and module state) · `ArOsBottomBar` · `ArOsSheet` (wraps `ModalBottomSheet`) · `ArOsDialog` · `ArOsEmptyState` · `ArOsProgressRing` / `ArOsProgressBar` · `ArOsSnackbar` · `ArOsTextField` styling.
+- For the large-title collapsing header, use the Material 3 collapsing app bar with its scroll behaviour, restyled with tokens, rather than hand-rolling nested-scroll logic. If it needs `@OptIn(ExperimentalMaterial3Api::class)`, that single opt-in is acceptable; list it in the report.
+- Prefer Material 3 behaviour (sheets, dialogs, text fields, switches) restyled by tokens; write custom components where Material looks Android-default (buttons, rows, segmented control, bottom bar).
+
+### 6.4 Dependencies
+- Allowed: what the project already has, plus Compose libraries already in the BOM (`animation`, `foundation`, `material3`).
+- **One optional addition:** Haze (latest stable on Maven Central) solely for Tier-1 glass (Section 7.5). If it does not resolve or conflicts with the project's Kotlin/Compose versions, drop Tier 1, keep Tier 0, and report it. Read Haze's current README for exact coordinates and API — do not trust remembered 1.x names.
+- Nothing else. No Lottie, Coil (unless images already exist), Accompanist, Hilt, Compose-destinations, etc.
+
+### 6.5 Design gallery (verification tool)
+Add one composable destination, `ArOsDesignGallery`, shown only when the app is debuggable (`(applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0`; do not rely on `BuildConfig`). It shows: every token, the full type scale (with a digit-width test line for `tnum`), every component in every state, motion samples, light/dark. It is how the visual result is inspected, and it must never be reachable in a non-debuggable build. Do NOT add a second Activity.
+
+### 6.6 Product-level UX rules (cohesion)
+1. One shell: persistent bottom navigation with at most 5 destinations; **AR/OS Core is home**. Other systems are reachable from Core and from the bar. Decide the exact destinations only after Stage 0.
+2. Every system's top-level screen uses `ArOsScreenScaffold`: large collapsing title, a one-line **status summary built from real data**, then grouped content, then the primary action in the standard place.
+3. Core surfaces ONLY real data from existing repositories/ViewModels. A system with no data source yet shows an honest "Not set up yet" / "Coming later" state — never invented numbers.
+4. Three presentation patterns, used consistently: **push** for detail, **bottom sheet** for create/edit, **alert dialog** for destructive confirmation.
+5. One empty-state pattern, one error pattern, one loading pattern (loading only where real async loading exists).
+6. Systems are distinguished by icon and title, not colour.
+7. Do not decide exact screen layouts before Stage 0. Propose them in the inspection report using the REF-2 concept as guidance, then implement.
+
+---
+
+## 7. COMPOSE ANIMATION AND PERFORMANCE INSTRUCTIONS
+
+### 7.1 Motion tokens — REFERENCE SKETCH (compile-fix as needed)
+```kotlin
+object ArOsMotion {
+    const val FadeInMs = 180
+    const val FadeOutMs = 120
+
+    /** Position/size changes the user can see travelling: expand, move, resize, screen push/pop. */
+    fun <T> standard(): SpringSpec<T> = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
+    /** Presses, toggles, selection. */
+    fun <T> snappy(): SpringSpec<T> = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium)
+    /** ONLY gesture release (sheet fling settle, drag release): a hair of overshoot. */
+    fun <T> release(): SpringSpec<T> = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow)
+
+    fun fadeIn(): TweenSpec<Float> = tween(FadeInMs, easing = LinearOutSlowInEasing)
+    fun fadeOut(): TweenSpec<Float> = tween(FadeOutMs, easing = FastOutLinearInEasing)
+}
+```
+
+### 7.2 Screen transitions — apply ONLY if the project uses Navigation Compose `NavHost`; otherwise use `AnimatedContent` with the same specs. Top-level tabs use cross-fade + 2 % scale, never a slide.
+```kotlin
+// REFERENCE SKETCH
+enterTransition     = { slideInHorizontally(ArOsMotion.standard<IntOffset>()) { it / 4 } + fadeIn(ArOsMotion.fadeIn()) }
+exitTransition      = { slideOutHorizontally(ArOsMotion.standard<IntOffset>()) { -it / 6 } + fadeOut(ArOsMotion.fadeOut()) }
+popEnterTransition  = { slideInHorizontally(ArOsMotion.standard<IntOffset>()) { -it / 6 } + fadeIn(ArOsMotion.fadeIn()) }
+popExitTransition   = { slideOutHorizontally(ArOsMotion.standard<IntOffset>()) { it / 4 } + fadeOut(ArOsMotion.fadeOut()) }
+// When rememberReducedMotion() is true: use fadeIn/fadeOut only (no slide).
+```
+
+### 7.3 Press feedback — adapted from the official Indication migration page
+```kotlin
+// REFERENCE SKETCH — requires androidx.compose.foundation 1.7.0+.
+// If the project's foundation is older, do NOT upgrade just for this: use a Modifier that reads
+// collectIsPressedAsState() and applies animateFloatAsState inside graphicsLayer { scaleX/scaleY }.
+object ArOsPressIndication : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode = PressNode(interactionSource)
+    override fun hashCode(): Int = -1
+    override fun equals(other: Any?) = other === this
+
+    private class PressNode(private val source: InteractionSource) : Modifier.Node(), DrawModifierNode {
+        private val scale = Animatable(1f)
+        override fun onAttach() {
+            coroutineScope.launch {
+                source.interactions.collectLatest { i ->
+                    when (i) {
+                        is PressInteraction.Press -> scale.animateTo(0.97f, ArOsMotion.snappy())
+                        is PressInteraction.Release, is PressInteraction.Cancel -> scale.animateTo(1f, ArOsMotion.snappy())
+                    }
+                }
+            }
+        }
+        override fun ContentDrawScope.draw() {
+            scale(scale.value, pivot = center) { this@draw.drawContent() }
+        }
+    }
+}
+// Theme root: CompositionLocalProvider(LocalIndication provides ArOsPressIndication) { ... }
+```
+
+### 7.4 Reduced motion and haptics — REFERENCE SKETCHES
+```kotlin
+@Composable
+fun rememberReducedMotion(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        runCatching {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE) == 0f
+        }.getOrDefault(false)   // setting missing = normal motion
+    }
+}
+
+enum class ArOsHaptic { Tick, Confirm, Reject, ToggleOn, ToggleOff }
+
+@Composable
+fun rememberArOsHaptics(): (ArOsHaptic) -> Unit {
+    val view = LocalView.current
+    return remember(view) {
+        val perform: (ArOsHaptic) -> Unit = { type ->
+            val sdk = Build.VERSION.SDK_INT
+            val c = when (type) {
+                ArOsHaptic.Tick      -> if (sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) HapticFeedbackConstants.SEGMENT_TICK else HapticFeedbackConstants.CLOCK_TICK
+                ArOsHaptic.Confirm   -> if (sdk >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.CONTEXT_CLICK
+                ArOsHaptic.Reject    -> if (sdk >= Build.VERSION_CODES.R) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+                ArOsHaptic.ToggleOn  -> if (sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.CONTEXT_CLICK
+                ArOsHaptic.ToggleOff -> if (sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) HapticFeedbackConstants.TOGGLE_OFF else HapticFeedbackConstants.CLOCK_TICK
+            }
+            view.performHapticFeedback(c)
+        }
+        perform
+    }
+}
+```
+If any constant fails to compile for the project's `compileSdk`, substitute the nearest older constant and note it in the report. Haptics respect the user's system vibration/touch-feedback settings; that is expected.
+
+### 7.5 Glass — two tiers
+- **Tier 0 (default everywhere, no dependency):** near-opaque layered surfaces with hairline border and tonal separation. Translucent fills WITHOUT blur over scrolling text look muddy — so Tier 0 must be effectively opaque.
+- **Tier 1 (optional, behind one kill switch):** true backdrop blur on AT MOST two persistent surfaces: the bottom bar and the collapsed large-title bar (and optionally sheet scrims). Requires API 31+ (the target phone qualifies); below that, or when the flag is off, render Tier 0. Build with Haze per Section 6.4.
+```kotlin
+object ArOsDesignFlags {
+    /** Flip to false if jank appears on-device (Section 11.3). Everything falls back to Tier 0. */
+    const val GlassBlur = true
+}
+```
+- NEVER apply blur or shaders to: the SOS countdown screen, anything over the lock screen, full-screen scrolling content, or text-heavy areas.
+- Default is ON only because the surface area is small; the on-device A/B test in Section 11.3 decides whether it stays.
+
+### 7.6 Performance rules (apply everywhere)
+1. **Read fast-changing state as late as possible.** Pass `State`/lambdas down; use `Modifier.graphicsLayer { }`, `offset { }`, `drawBehind { }` / `Canvas` for animated values so only draw/layout re-runs. Example: `val p by animateFloatAsState(target, ArOsMotion.standard())` then read `p` inside the `Canvas`/`drawBehind` lambda, not in composition.
+2. **High-frequency state (timers, progress) must recompose the smallest possible node** — the single `Text` or the draw lambda — never the whole screen.
+3. Lazy lists: stable unique `key` (never index or `hashCode`), `contentType` for mixed rows, `contentPadding` instead of outer padding, `animateItem()` for placement. No `list.indexOf(item)` inside `items`.
+4. `remember` for expensive derivations only (sorting, formatting); hoist formatters and date formatters out of composition; do not allocate `Brush`/`Path`/`Shape` objects per frame.
+5. For "threshold crossed" conditions (e.g. show the collapsed title) use `remember { computedStateOf { ... } }` if the project's Compose Runtime is 1.13+, otherwise `remember { derivedStateOf { ... } }`. Per the official page, `derivedStateOf` also stays right for expensive calculations read several times in one pass. Do not pass state read inside `derivedStateOf` as a `remember` key. Never write state after reading it in the same composition.
+6. UI state classes are immutable; callbacks are stable. Prefer `Modifier.Node`-based custom modifiers over `composed { }`.
+7. Shadows: tonal separation first; `Modifier.shadow` only on floating overlays, one at a time.
+8. No `rememberInfiniteTransition` except the loading exception in 4.1. No more than one large animation running at once.
+9. No large bitmaps; icons are vectors.
+10. Do not add `@Stable`/`@Immutable` annotations speculatively; only fix measured or reported instability.
+11. Debug builds are slower than release. Never judge smoothness from a debug build (Section 11.3).
+
+---
+
+## 8. EXISTING FUNCTIONALITY MUST BE PRESERVED
+
+### 8.1 Protected — do NOT modify behaviour in:
+repositories, ViewModels (state shape and logic), Room entities/DAOs/database and migrations, DataStore keys, domain/engine classes, services, accessibility service, broadcast receivers, workers, notifications logic, permission-handling logic, call logic, the SOS state machine, the volume-press detector, `AndroidManifest.xml` (see 8.3), and all existing unit tests.
+**Editable:** Compose UI files, theme, resources (fonts, drawables, strings used only for UI), and minimal UI wiring (theme provider, `enableEdgeToEdge()`), in `shell/` and each feature's `ui/` package.
+
+### 8.2 Rules (all required)
+1. Inspect the project before changing anything (Stage 0).
+2. Understand existing screens, features, data models and navigation.
+3. Keep working logic, ViewModels, repositories and app state; change how screens READ and PRESENT them, not how they work.
+4. Preserve database structure and existing data (no schema or key changes).
+5. Preserve permission handling and Android services exactly.
+6. **Preserve AR SOS behaviour exactly**, including: the lock-screen privacy rule (while the keyguard is locked and no SOS flow is active, NO other screen may render — only the blank/"Unlock to open AR/OS" state), the SOS-mode activity handling (`showWhenLocked`/`turnScreenOn`, `finishAndRemoveTask`, `onNewIntent`), TEST/LIVE mode banners and confirmation dialogs, exact readiness strings (`TEST MODE — no calls will be placed`, `READY — not a guarantee`, `NEEDS ATTENTION`), the disclosure and limitation texts, the honest wording "AR SOS is a personal convenience, not emergency equipment", and the non-dismissable note that it does not replace the phone's built-in Emergency SOS. Never show a bare "Protected"/"Safe". Never claim AR SOS is guaranteed.
+7. Do not replace functional systems with static mockups; do not add fake data where real data exists.
+8. No unnecessary dependencies or architectural rewrites.
+9. Keep presentation separate from business logic; no business rules inside new components.
+10. If a feature is incomplete or broken, list it under "Pre-existing issues found" — do not fix it silently.
+
+### 8.3 Manifest and Gradle
+Allowed only: theme/style attributes needed for edge-to-edge, and (if required) the optional Haze dependency. Do NOT add permissions. Do NOT use the predictive-back opt-out. List every manifest/Gradle change in the report.
+
+---
+
+## 9. ACCESSIBILITY AND RESPONSIVE BEHAVIOUR
+
+1. **Font scale:** every screen usable at 85 %, 100 %, 130 %, 200 %; no clipped or overlapping text; no fixed heights around text; wrap or truncate deliberately.
+2. **Touch targets** ≥ 48 dp (use `minimumInteractiveComponentSize()` for small visuals); SOS surfaces ≥ 56 dp.
+3. **Contrast** per Section 2.4, in light AND dark; never colour alone to show state (add icon/text).
+4. **TalkBack:** `contentDescription` for non-text elements (null only for decorative), `Role` on custom clickables, `stateDescription` on toggles and statuses, `mergeDescendants` for row-like items, logical traversal order, `customActions` for any gesture-only feature (swipe, reorder).
+5. **Errors and confirmations:** clear text, correct focus, destructive actions confirmed with a dialog.
+6. **Reduced motion:** Section 4.3.
+7. **Back:** predictive back works; no use of `onBackPressed`/`KEYCODE_BACK`; the manifest opt-out is NOT used. The SOS flow's back/cancel semantics stay exactly as they are.
+8. **System bars:** edge-to-edge via `enableEdgeToEdge()` + `Scaffold`/`safeDrawing`; lazy lists use `contentPadding`; `consumeWindowInsets` to avoid double padding; `imePadding()` on form screens without double-counting the navigation bar. Must also work on Android 15 and below.
+9. **Responsive:** phone-first at about 360 dp wide up; constrain content to a comfortable maximum width (around 600 dp) on wide screens; portrait and landscape must not break.
+10. **Appearance:** System/Light/Dark all fully styled; no hard-coded colours in screens.
+
+---
+
+## 10. SEQUENTIAL IMPLEMENTATION PLAN (the project must build after each stage)
+
+**Stage 0 — Inspect (no code changes).** Read the Gradle files, manifest, theme, navigation, every screen, ViewModel, repository and unit test. Post an **Inspection Report**: (a) Kotlin/Compose BOM/Material 3/navigation approach/icon set/fonts/existing animations; (b) how the appearance preference is stored and applied; (c) a table: screen → composable file → ViewModel → data source → real or placeholder → planned design-system components; (d) existing hard-coded colours/dp/sp to be tokenised; (e) the protected-file list; (f) a proposed navigation structure and screen layouts (guided by REF-2, per 6.6); (g) pre-existing issues. Then continue automatically unless you hit a blocker.
+
+**Stage 1 — Foundation.** Tokens, theme (light/dark/system preserved), type scale + font swap points, spacing/shapes/elevation, `ArOsMotion`, press indication, reduced-motion and haptics helpers, edge-to-edge setup. No screen redesign yet; the app must still look and behave the same, within the new theme.
+
+**Stage 2 — Components + gallery.** Build the Section 6.3 components needed, then `ArOsDesignGallery`. Inspect it in the emulator in light/dark and at larger font scales; fix defects.
+
+**Stage 3 — Shell and navigation.** Scaffold, bottom bar, transitions (Section 7.2), predictive-back check, insets. Do not change routes or destinations' behaviour.
+
+**Stage 4 — AR/OS Core (home).** Real data only. Establish the cross-system language: status summaries, section pattern, primary action placement.
+
+**Stage 5 — Migrate systems one at a time, lowest risk first:** Settings/Help/placeholders → Phone Activity Ledger → Routine Engine → Discipline Engine → Digital Guardian → Focus Engine → Adaptive Intelligence → **AR SOS last** (Setup, Contacts, Settings, Trigger Lab, Event Log, Help, then the countdown screen with extra caution per 4.5 and 8.2(6)). Only systems that actually exist; placeholders get the honest placeholder pattern. After EACH system: build, run existing unit tests, confirm no protected file changed (`diff` list), view in emulator (light/dark/larger font).
+
+**Stage 6 — Polish passes.** Motion pass (everything in the 4.2 table), haptics pass (4.4 only), empty/error/confirmation states, Tier-1 glass, accessibility pass (Section 9).
+
+**Stage 7 — Validate and report.** Build, run unit tests, produce `docs/AR_OS_DESIGN_SYSTEM.md`, `docs/AR_OS_UI_TEST_PLAN.md`, and the completion report.
+
+Do NOT make one massive rewrite. If a stage cannot be completed, finish what is safe, stop, and report precisely what remains.
+
+---
+
+## 11. BUILD, VALIDATION AND REAL-DEVICE TESTING
+
+A successful build does NOT mean the UI is polished or smooth. Require visual inspection, interaction testing and performance verification.
+
+### 11.1 You do (in AI Studio)
+Build after every stage; run existing unit tests; inspect each migrated screen in the emulator in light, dark, and larger font scale; test emulator with animations turned off; list anything you cannot verify as "NOT VERIFIED — requires physical device".
+
+### 11.2 Write `docs/AR_OS_UI_TEST_PLAN.md` (table: ID | Test | Steps | Expected | Result = NOT RUN | Notes) covering at least:
+- **Visual:** compare each system's main screen with REF-2 for intent; light/dark; font scale 85/130/200 %; display size largest; no clipped text.
+- **Accessibility:** TalkBack pass through every screen; traversal order; touch targets; contrast; "Remove animations" on.
+- **Navigation:** forward/back ×20 per system; predictive back gesture; tab switching; sheet open/close/drag; rotate.
+- **Regression (AR SOS):** re-run the earlier AR SOS device tests T3 (home screen trigger, TEST mode) and T6 (lock-screen trigger, TEST mode: countdown shows, no other screen visible, Cancel works from screen and notification), and confirm native Emergency SOS is untouched. Run LIVE-mode tests (T17/T18) ONLY with a consenting test contact who has been told first.
+- **Data:** existing data still present after the update; appearance preference still applies.
+
+### 11.3 Performance protocol for a beginner, on the Moto G57 Power (write this into the test plan in plain language)
+1. **Keep a backup first:** download the project ZIP of the current AR/OS BEFORE applying this redesign, so before/after can be compared.
+2. Use a **release-like, non-debuggable build** (debug builds are slower). Do NOT edit Gradle build types inside the AI Studio project for this; in the report give beginner steps for doing it in Android Studio (build variant release, signed with the debug key for personal testing).
+3. Phone: Developer options → **Profile GPU Rendering → On screen as bars** (the name varies by version) and watch bars cross the frame line while scrolling.
+4. Numbers: connect via USB, then `adb shell dumpsys gfxinfo <package> reset`, perform a scripted 30-second interaction (scroll the longest list, switch tabs, open/close a sheet, push/pop a screen ×10), then `adb shell dumpsys gfxinfo <package>` and record total frames, **janky frames (count and %)** and the 90th/95th/99th-percentile frame times (output format can vary by Android version).
+5. Judge against the frame budget: 16 ms at 60 Hz, 11 ms at 90 Hz, 8 ms at 120 Hz. Test with the phone's refresh-rate setting on BOTH "standard" and "smooth/high". Record both.
+6. **A/B for glass:** repeat step 4 with `ArOsDesignFlags.GlassBlur` true and false. If blur adds visible jank or heat, set it to false.
+7. **Sustained test:** run the Focus timer 10 minutes with the screen on; note any frame drops, heat, and per-app battery use afterwards (Settings → Battery).
+8. Compare with the "before" build from step 1. Record results; do not describe the app as smooth until measured.
+
+---
+
+## 12. COMPLETION REPORT (exactly these sections)
+
+1. **Summary** (5 lines).
+2. **Files created.**
+3. **Files changed** — and an explicit statement of whether ANY protected file (8.1) was changed, with justification if so.
+4. **Existing features preserved** — table: system → screen(s) → what was checked.
+5. **New UI components introduced** (and which were NOT needed).
+6. **Animation implementation choices** — which APIs were used where, any experimental opt-ins, what was skipped (e.g. shared elements) and why.
+7. **Dependencies added or changed** (expected: none, or Haze only) and exact versions; any BOM/Kotlin/AGP change.
+8. **Manifest / Gradle changes.**
+9. **Typography status** — fonts wired or pending; the 5 beginner steps to add them; result of the `tnum` digit-width test.
+10. **Colour status** — how roles were derived from REF-1/REF-2; any mode derived rather than shown; contrast results.
+11. **Build results** — per stage.
+12. **Known limitations and Pre-existing issues found (not changed).**
+13. **Assumptions made.**
+14. **Verification status** — what was verified in the emulator vs "NOT VERIFIED — requires physical device"; link to `docs/AR_OS_UI_TEST_PLAN.md`.
+15. **Real-device tests still required** (Section 11.2/11.3) and **what remains incomplete**.
+16. **Next recommended steps** (short list).
+
+Do not claim smoothness, 60 FPS, TalkBack correctness, haptic feel, or lock-screen behaviour as verified unless they were actually measured on a physical device.

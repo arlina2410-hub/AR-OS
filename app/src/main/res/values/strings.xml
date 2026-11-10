@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AR/OS</string>
+    <string name="ar_sos_service_description">AR SOS watches only for five quick presses of the Volume Down button so it can start an emergency call to your trusted contact. It does not read your screen, other apps, messages, or anything you type.</string>
+</resources>
