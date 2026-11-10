@@ -17,6 +17,8 @@ Tracking implementation, status, testing, and hardware verification for all seve
 | **Discipline Engine** | COMPLETE | `DisciplineRuleEntity.kt`, `DisciplineDao.kt`, `DisciplineGatekeeper.kt`, `DisciplineScreen.kt` | Cognitive friction gates, 10s breath challenge, pledge typing, arithmetic challenges | Automated tests PASS | NO (Local interactive) |
 | **Adaptive Intelligence** | COMPLETE | `AdaptiveInsightEntity.kt`, `AdaptiveInsightDao.kt`, `AdaptiveEngine.kt`, `AdaptiveScreen.kt` | On-device heuristic insights, streak trend analysis, localized habit optimization suggestions | Automated U16 PASS | NO (Local heuristics) |
 | **Navigation & 12-Hour Time Format** | COMPLETE | `AppNav.kt`, `ArOsBottomBar.kt`, `DashboardScreen.kt`, `SafetyHubScreen.kt`, `TimeFormatter.kt` | 5 plain bottom tabs (Home, Safety, Rhythms, Focus, More), prominent TEST ⇄ LIVE switch, 12-hour time default with AM/PM across all screens | 32 Automated Tests PASS | YES (Physical UI evaluation) |
+| **AR Guard: Device Lock Gate** | COMPLETE | `ArGuardAccessibilityService.kt`, `GuardEngine.kt`, `GuardRepositoryImpl.kt`, `GuardOverlayManager.kt`, `GuardGateOverlayView.kt`, `GuardScreen.kt` | Second accessibility service gate (TYPE_ACCESSIBILITY_OVERLAY, non-focusable), PBKDF2WithHmacSHA256 (100k iter), 5 free tries + ladder (30s, 1m, 5m, 15m, 1h cap), 16-char recovery code, SOS & call non-interference, dedicated ar_os_guard_settings DataStore | Automated U17–U22 PASS | YES (G1–G8) — Requires physical phone keyguard & display |
+| **Lost Guard: Anti-Theft Defense** | COMPLETE | `LostGuardRules.kt`, `ArGuardAccessibilityService.kt`, `GuardLabScreen.kt`, `ArGuardDeviceAdminReceiver.kt`, `GuardScreen.kt` | Closes power menu (BACK+HOME), closes shade (GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE on API 31+ with fallback), closes settings/installers (HOME), 300ms throttling, zero action during SOS/call, 10-min Learn Mode, custom blocked windows, plain tamper log, optional device admin uninstall protection, Android 17 theft checklist | Automated tests PASS (LostGuardRulesTest 9/9) | YES (L1–L7) — Requires physical window events |
 
 ---
 
@@ -27,3 +29,18 @@ The following requirements must be tested on the physical device because emulato
 3. **T12 / T2 (Restricted Settings Unlock on Android 13+)**: If Accessibility toggle is grayed out, follow the 3-dot "Allow restricted settings" flow in App Info.
 4. **T18 / T25 (Live Cellular Outgoing Call & Dual SIM Routing)**: Verify `TelecomManager.placeCall` dials the primary contact over cellular SIM without launching dual-SIM system dialog.
 5. **T26 (One-Tap Live Test Call)**: Verify the "Place one real test call now" button initiates a direct call to the primary guardian.
+6. **G1 (AR Guard Service Activation)**: Enable AR Guard in Accessibility Settings on Moto G57 Power (follow 3-dot restricted settings flow if needed).
+7. **G2 (Lock Now Verification)**: Tap "Lock Now" in AR Guard, enter incorrect PIN (wrong attempt registered), then correct PIN (gate dismissed).
+8. **G3 (Screen Off Re-lock)**: Turn screen off, unlock phone's keyguard; verify gate appears according to selected re-lock delay (Immediately, 30s, 2m).
+9. **G4 (Reboot Resilience)**: Restart phone; after passing phone's screen lock, AR Guard gate covers apps.
+10. **G5 (Anti-Brute-Force Lockout)**: Enter 6 wrong PINs; verify 30-second lockout countdown banner appears and keypad is temporarily locked.
+11. **G6 (Emergency SOS Non-Interference)**: While the AR Guard gate is showing, press physical Volume Down 5 times; verify SOS countdown immediately appears over the gate.
+12. **G7 (Call Non-Interference)**: Receive an incoming phone call or dial while gate is armed; verify gate suspends during active call.
+13. **G8 (Forgot-PIN Recovery Path)**: Tap "Forgot PIN?", enter 16-character recovery code, and verify session unlocks.
+14. **L1 (Power Menu Interception)**: While AR Guard is locked, hold Power / press Power+VolUp to open power menu; verify it immediately dismisses (BACK+HOME). [NOT RUN - needs physical device]
+15. **L2 (Notification Shade Dismissal)**: While AR Guard is locked, pull down notification shade / quick settings; verify shade automatically snaps closed. [NOT RUN - needs physical device]
+16. **L3 (Settings Redirection)**: While AR Guard is locked, attempt to launch phone Settings; verify it redirects to home screen immediately. [NOT RUN - needs physical device]
+17. **L4 (Guard Lab Learn Mode)**: Tap "Turn On Learn Mode (10 min)"; open custom apps; verify window package and class names appear in the observed windows list. [NOT RUN - needs physical device]
+18. **L5 (Custom Blocked Target)**: In Guard Lab, tap "Block this window while locked" on an observed screen; verify that screen is closed to home when AR Guard is locked. [NOT RUN - needs physical device]
+19. **L6 (Tamper Log & Airplane Mode Detection)**: Switch airplane mode on while locked; unlock and open Guard; verify airplane mode tamper event is logged with 12-hour timestamp. [NOT RUN - needs physical device]
+20. **L7 (Uninstall Protection)**: Enable Uninstall Protection via Device Admin; attempt to uninstall AR/OS from launcher; verify uninstallation is blocked until Device Admin is deactivated. [NOT RUN - needs physical device]

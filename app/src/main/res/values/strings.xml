@@ -1,4 +1,6 @@
 <resources>
     <string name="app_name">AR/OS</string>
     <string name="ar_sos_service_description">AR SOS watches only for five quick presses of the Volume Down button so it can start an emergency call to your trusted contact. It does not read your screen, other apps, messages, or anything you type.</string>
+    <string name="ar_guard_service_name">AR Guard Gate</string>
+    <string name="ar_guard_service_description">AR Guard closes the power menu, notification shade, and Settings while your phone is locked to deter thieves. It only reads window titles and package names, never your screen contents, text, messages, or typing.</string>
 </resources>

@@ -49,6 +49,7 @@ fun MoreHubScreen(
     onNavigateTo: (AppDestination) -> Unit
 ) {
     val items = listOf(
+        MoreItem("AR Guard", "Full-screen device gate protecting your apps after unlock.", Icons.Default.Security, AppDestination.GUARD),
         MoreItem("Activity Ledger", "Screen interactions timeline and daily intentional focus summary.", Icons.Default.QueryStats, AppDestination.LEDGER),
         MoreItem("Digital Guardian", "On-device inspection of camera, mic, and location permissions.", Icons.Default.Shield, AppDestination.GUARDIAN),
         MoreItem("Focus Rules", "Mindful friction gates before launching distracting apps.", Icons.Default.Lock, AppDestination.DISCIPLINE),

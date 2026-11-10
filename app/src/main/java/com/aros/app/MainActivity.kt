@@ -389,7 +389,9 @@ class MainActivity : ComponentActivity() {
                                         coroutineScope.launch {
                                             container.adaptiveEngine.dismissInsight(id)
                                         }
-                                    }
+                                    },
+                                    guardRepository = container.guardRepository,
+                                    guardEngine = container.guardEngine
                                 )
                             }
                         }

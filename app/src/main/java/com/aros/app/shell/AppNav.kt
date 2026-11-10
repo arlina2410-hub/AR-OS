@@ -68,7 +68,9 @@ enum class AppDestination(val label: String) {
     SOS_LAB("Trigger Lab"),
     SOS_LOG("SOS History"),
     SOS_HELP("Safety Limits"),
-    GALLERY("Design Gallery")
+    GALLERY("Design Gallery"),
+    GUARD("AR Guard"),
+    GUARD_LAB("Guard Lab")
 }
 
 @Composable
@@ -133,7 +135,11 @@ fun AppNav(
     // Adaptive
     sovereigntyBreakdown: SovereigntyScoreBreakdown,
     adaptiveInsights: List<AdaptiveInsightEntity>,
-    onDismissAdaptiveInsight: (Long) -> Unit
+    onDismissAdaptiveInsight: (Long) -> Unit,
+
+    // AR Guard Module
+    guardRepository: com.aros.app.feature.guard.domain.GuardRepository,
+    guardEngine: com.aros.app.feature.guard.domain.GuardEngine
 ) {
     var currentDestination by remember { mutableStateOf(AppDestination.HOME) }
 
@@ -159,6 +165,8 @@ fun AppNav(
         AppDestination.SOS_LAB,
         AppDestination.SOS_LOG,
         AppDestination.SOS_HELP,
+        AppDestination.GUARD,
+        AppDestination.GUARD_LAB,
         AppDestination.GALLERY -> ArOsNavDestination.More
     }
 
@@ -218,6 +226,7 @@ fun AppNav(
 
                 AppDestination.PERMISSIONS -> PermissionCenterScreen(
                     readinessReport = readinessReport,
+                    guardRepository = guardRepository,
                     onNavigateBack = { currentDestination = AppDestination.HOME }
                 )
 
@@ -281,6 +290,18 @@ fun AppNav(
                 )
 
                 AppDestination.SOS_HELP -> HelpLimitsScreen()
+
+                AppDestination.GUARD -> com.aros.app.feature.guard.ui.GuardScreen(
+                    guardRepository = guardRepository,
+                    guardEngine = guardEngine,
+                    onNavigateToLab = { currentDestination = AppDestination.GUARD_LAB },
+                    onNavigateBack = { currentDestination = AppDestination.MORE }
+                )
+
+                AppDestination.GUARD_LAB -> com.aros.app.feature.guard.ui.GuardLabScreen(
+                    guardRepository = guardRepository,
+                    onNavigateBack = { currentDestination = AppDestination.GUARD }
+                )
 
                 AppDestination.GALLERY -> ArOsDesignGallery(
                     onBack = { currentDestination = AppDestination.HOME }

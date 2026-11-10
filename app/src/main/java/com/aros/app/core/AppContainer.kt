@@ -122,4 +122,13 @@ class AppContainer(val context: Context) {
         ioDispatcher = dispatchers.io,
         scope = applicationScope
     )
+
+    // AR Guard Module
+    val guardEngine: com.aros.app.feature.guard.domain.GuardEngine = com.aros.app.feature.guard.domain.GuardEngine()
+    val guardRepository: com.aros.app.feature.guard.domain.GuardRepository = com.aros.app.feature.guard.data.GuardRepositoryImpl(
+        context = context,
+        guardEngine = guardEngine,
+        scope = applicationScope,
+        cryptoDispatcher = dispatchers.default
+    )
 }

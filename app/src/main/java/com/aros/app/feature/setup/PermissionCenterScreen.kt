@@ -38,6 +38,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +59,7 @@ import com.aros.app.feature.sos.domain.ReadinessReport
 @Composable
 fun PermissionCenterScreen(
     readinessReport: ReadinessReport?,
+    guardRepository: com.aros.app.feature.guard.domain.GuardRepository? = null,
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -137,6 +140,86 @@ fun PermissionCenterScreen(
                                     }
                                 }
                             }
+                        }
+                    )
+                }
+            }
+
+            if (guardRepository != null) {
+                item(key = "ar_guard_service_check") {
+                    val guardConfig by guardRepository.configFlow.collectAsState(initial = com.aros.app.feature.guard.domain.GuardConfig())
+                    val isGuardConnected by guardRepository.isServiceConnected.collectAsState()
+
+                    val guardCheck = when {
+                        !guardConfig.isConfigured -> ReadinessCheckResult(
+                            id = "ar_guard_service",
+                            title = "AR Guard Device Gate",
+                            description = "Not set up yet",
+                            isPassing = true,
+                            action = null
+                        )
+                        isGuardConnected -> ReadinessCheckResult(
+                            id = "ar_guard_service",
+                            title = "AR Guard Device Gate",
+                            description = "AR Guard is ARMED • Gate active",
+                            isPassing = true,
+                            action = null
+                        )
+                        else -> ReadinessCheckResult(
+                            id = "ar_guard_service",
+                            title = "AR Guard Device Gate",
+                            description = "AR Guard is OFF • Device gate inactive",
+                            isPassing = false,
+                            action = null
+                        )
+                    }
+
+                    PermissionRowCard(
+                        check = guardCheck,
+                        onFix = {
+                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
+                        }
+                    )
+                }
+
+                item(key = "lost_guard_defense_check") {
+                    val guardConfig by guardRepository.configFlow.collectAsState(initial = com.aros.app.feature.guard.domain.GuardConfig())
+                    val isGuardConnected by guardRepository.isServiceConnected.collectAsState()
+
+                    val lostGuardCheck = when {
+                        !guardConfig.isConfigured -> ReadinessCheckResult(
+                            id = "lost_guard_defense",
+                            title = "Lost Guard Window Defense",
+                            description = "Armed automatically when AR Guard is set up",
+                            isPassing = true,
+                            action = null
+                        )
+                        isGuardConnected -> ReadinessCheckResult(
+                            id = "lost_guard_defense",
+                            title = "Lost Guard Window Defense",
+                            description = "Active • Power menu & shade interceptor armed",
+                            isPassing = true,
+                            action = null
+                        )
+                        else -> ReadinessCheckResult(
+                            id = "lost_guard_defense",
+                            title = "Lost Guard Window Defense",
+                            description = "AR Guard accessibility service is OFF",
+                            isPassing = false,
+                            action = null
+                        )
+                    }
+
+                    PermissionRowCard(
+                        check = lostGuardCheck,
+                        onFix = {
+                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
                         }
                     )
                 }
