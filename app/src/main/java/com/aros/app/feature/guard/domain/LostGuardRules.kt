@@ -3,7 +3,7 @@ package com.aros.app.feature.guard.domain
 /**
  * Pure Kotlin decision engine for Lost Guard.
  * Evaluates whether an observed window state change should be intercepted and closed
- * while AR Guard is locked.
+ * while AR Guard is locked, including closing the call/SOS hole (Prompt 3B).
  *
  * Guaranteed zero android.* imports for local JVM testing.
  */
@@ -17,6 +17,52 @@ class LostGuardRules(
     }
 
     /**
+     * Determines whether the gate overlay should be shown or hidden.
+     * While a call or SOS is active, the gate steps aside ONLY while the foreground package is allowed.
+     * The moment any other window comes to the front, the gate comes back.
+     *
+     * @return true if the gate overlay should be visible, false if it should be hidden
+     */
+    fun shouldShowGate(
+        isGuardConfigured: Boolean,
+        isSessionUnlocked: Boolean,
+        isKeyguardLocked: Boolean,
+        isSosActive: Boolean,
+        isCallActive: Boolean,
+        foregroundPackage: String?,
+        allowedCallSosPackages: List<String>
+    ): Boolean {
+        if (!isGuardConfigured || isSessionUnlocked || isKeyguardLocked) {
+            return false
+        }
+
+        // If a call or SOS is active:
+        if (isSosActive || isCallActive) {
+            val pkg = foregroundPackage ?: ""
+            // Gate steps aside ONLY if foreground package is in allowed list
+            if (isPackageAllowedDuringCallSos(pkg, allowedCallSosPackages)) {
+                return false
+            }
+            // Otherwise, any other window brings the gate back
+            return true
+        }
+
+        // Normal locked state without active call/SOS: gate must show
+        return true
+    }
+
+    /**
+     * Checks if a package is allowed during an active call or SOS.
+     */
+    fun isPackageAllowedDuringCallSos(
+        packageName: String?,
+        allowedCallSosPackages: List<String>
+    ): Boolean {
+        if (packageName.isNullOrBlank()) return false
+        return allowedCallSosPackages.any { it.equals(packageName, ignoreCase = true) }
+    }
+
+    /**
      * Evaluates window state change.
      *
      * @param packageName Package name of the foreground window
@@ -24,6 +70,7 @@ class LostGuardRules(
      * @param isGuardLocked True if AR Guard is currently locked
      * @param isSosActive True if SOS countdown or call is in progress
      * @param isCallActive True if regular phone call is in progress
+     * @param allowedCallSosPackages Packages allowed during call/SOS (dialer, in-call UI, AR/OS)
      * @param customBlockedTargets User-defined custom targets from Guard Lab
      * @param nowElapsed Current elapsed realtime in milliseconds
      */
@@ -33,42 +80,46 @@ class LostGuardRules(
         isGuardLocked: Boolean,
         isSosActive: Boolean,
         isCallActive: Boolean,
-        customBlockedTargets: List<BlockedTarget>,
-        nowElapsed: Long
+        allowedCallSosPackages: List<String> = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES,
+        customBlockedTargets: List<BlockedTarget> = emptyList(),
+        nowElapsed: Long = 0L
     ): LostGuardAction {
         // Lost Guard rules run only while AR Guard is LOCKED
         if (!isGuardLocked) {
             return LostGuardAction.NONE
         }
 
-        // Never intercept or interfere with active SOS or phone calls
-        if (isSosActive || isCallActive) {
-            return LostGuardAction.NONE
-        }
-
         val pkg = packageName ?: ""
         val cls = className ?: ""
 
+        // Prompt 3B: While a call or SOS is active, rules and gate step aside ONLY while foreground window is an allowed window
+        if (isSosActive || isCallActive) {
+            if (isPackageAllowedDuringCallSos(pkg, allowedCallSosPackages)) {
+                return LostGuardAction.NONE
+            }
+            // Otherwise, an unallowed window came to the front during a call or SOS: rules APPLY
+        }
+
         // Throttle check: at most 1 action per 300ms per window
-        if (nowElapsed - lastActionElapsedRealtime < throttleMs) {
+        if (nowElapsed > 0L && (nowElapsed - lastActionElapsedRealtime < throttleMs)) {
             return LostGuardAction.NONE
         }
 
         // 1. Power Menu: typically SystemUI GlobalActions / PowerMenu
         if (isPowerMenu(pkg, cls)) {
-            lastActionElapsedRealtime = nowElapsed
+            if (nowElapsed > 0L) lastActionElapsedRealtime = nowElapsed
             return LostGuardAction.CLOSE_POWER_MENU
         }
 
         // 2. Notification Shade & Quick Settings: SystemUI Notification / QuickSettings / Shade
         if (isNotificationShade(pkg, cls)) {
-            lastActionElapsedRealtime = nowElapsed
+            if (nowElapsed > 0L) lastActionElapsedRealtime = nowElapsed
             return LostGuardAction.DISMISS_NOTIFICATION_SHADE
         }
 
         // 3. Settings / Package Installer / Uninstaller
         if (isSettingsOrInstaller(pkg, cls)) {
-            lastActionElapsedRealtime = nowElapsed
+            if (nowElapsed > 0L) lastActionElapsedRealtime = nowElapsed
             return LostGuardAction.GO_HOME
         }
 
@@ -76,7 +127,7 @@ class LostGuardRules(
         for (target in customBlockedTargets) {
             if (target.packageName.isNotBlank() && pkg == target.packageName) {
                 if (target.className.isBlank() || cls == target.className || cls.contains(target.className, ignoreCase = true)) {
-                    lastActionElapsedRealtime = nowElapsed
+                    if (nowElapsed > 0L) lastActionElapsedRealtime = nowElapsed
                     return LostGuardAction.GO_HOME
                 }
             }

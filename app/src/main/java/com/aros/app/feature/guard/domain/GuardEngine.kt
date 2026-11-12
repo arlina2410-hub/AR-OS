@@ -18,7 +18,7 @@ class GuardEngine {
         const val RECOVERY_CODE_LENGTH = 16
 
         // Unambiguous alphanumeric characters (omitting 0, O, 1, I)
-        private const val RECOVERY_CHARSET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+        const val RECOVERY_CHARSET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
         val LOCKOUT_LADDER_SECONDS = listOf(
             30L,    // 6th attempt
@@ -27,6 +27,9 @@ class GuardEngine {
             900L,   // 9th attempt (15m)
             3600L   // 10th+ attempt (1h cap)
         )
+
+        const val MAX_LOCKOUT_SECONDS = 3600L
+        const val MAX_LEARN_MODE_SECONDS = 600L // 10 minutes
     }
 
     private val secureRandom = SecureRandom()
@@ -62,6 +65,49 @@ class GuardEngine {
         return LOCKOUT_LADDER_SECONDS[index]
     }
 
+    /**
+     * Clamps stored lockout expiration against the maximum allowed delay for the failed-attempts count.
+     * Prevents reboot corruption where elapsedRealtime values were written as epoch or far-future times.
+     */
+    fun clampLockoutUntilEpoch(
+        storedLockoutEpochMillis: Long,
+        failedAttempts: Int,
+        nowEpochMillis: Long
+    ): Long {
+        if (storedLockoutEpochMillis <= 0L || storedLockoutEpochMillis <= nowEpochMillis) {
+            return 0L
+        }
+        val maxDelaySec = computeLockoutSeconds(failedAttempts)
+        if (maxDelaySec <= 0L) {
+            return 0L
+        }
+        val maxAllowedEpoch = nowEpochMillis + (maxDelaySec * 1000L)
+        return if (storedLockoutEpochMillis > maxAllowedEpoch) {
+            maxAllowedEpoch
+        } else {
+            storedLockoutEpochMillis
+        }
+    }
+
+    /**
+     * Clamps stored learn mode expiration to at most 10 minutes from now.
+     * If stored value exceeds 10 minutes from now, it is treated as expired (0L).
+     */
+    fun clampLearnModeExpiresEpoch(
+        storedLearnEpochMillis: Long,
+        nowEpochMillis: Long
+    ): Long {
+        if (storedLearnEpochMillis <= 0L || storedLearnEpochMillis <= nowEpochMillis) {
+            return 0L
+        }
+        val maxAllowedEpoch = nowEpochMillis + (MAX_LEARN_MODE_SECONDS * 1000L)
+        return if (storedLearnEpochMillis > maxAllowedEpoch) {
+            0L // Treat far-future corruption as expired per Fix 2
+        } else {
+            storedLearnEpochMillis
+        }
+    }
+
     fun verifySecret(
         secret: CharArray,
         storedHashBase64: String,
@@ -85,13 +131,19 @@ class GuardEngine {
     fun evaluatePinAttempt(
         enteredPin: CharArray,
         config: GuardConfig,
-        currentElapsedRealtime: Long,
+        nowEpochMillis: Long,
         formattedTime12h: String
     ): Pair<VerifyResult, GuardConfig> {
+        val clampedLockout = clampLockoutUntilEpoch(
+            config.lockoutUntilEpochMillis,
+            config.consecutiveFailedAttempts,
+            nowEpochMillis
+        )
+
         // 1. Check if currently locked out
-        if (currentElapsedRealtime < config.lockoutUntilElapsedRealtime) {
-            val remainingSec = ((config.lockoutUntilElapsedRealtime - currentElapsedRealtime) / 1000L).coerceAtLeast(1L)
-            return Pair(VerifyResult.LockedOut(remainingSec), config)
+        if (nowEpochMillis < clampedLockout) {
+            val remainingSec = ((clampedLockout - nowEpochMillis) / 1000L).coerceAtLeast(1L)
+            return Pair(VerifyResult.LockedOut(remainingSec), config.copy(lockoutUntilEpochMillis = clampedLockout))
         }
 
         // 2. Verify PIN
@@ -99,7 +151,7 @@ class GuardEngine {
         if (isCorrect) {
             val updatedConfig = config.copy(
                 consecutiveFailedAttempts = 0,
-                lockoutUntilElapsedRealtime = 0L
+                lockoutUntilEpochMillis = 0L
             )
             return Pair(VerifyResult.Success, updatedConfig)
         }
@@ -107,10 +159,10 @@ class GuardEngine {
         // 3. Failed attempt: increment counter and calculate delay
         val newFailedCount = config.consecutiveFailedAttempts + 1
         val lockoutSec = computeLockoutSeconds(newFailedCount)
-        val lockoutUntil = if (lockoutSec > 0) currentElapsedRealtime + (lockoutSec * 1000L) else 0L
+        val lockoutUntil = if (lockoutSec > 0) nowEpochMillis + (lockoutSec * 1000L) else 0L
 
         val newHistoryRecord = FailedAttemptRecord(
-            timestampMillis = System.currentTimeMillis(),
+            timestampMillis = nowEpochMillis,
             formattedTime12h = formattedTime12h,
             totalFailedCount = newFailedCount
         )
@@ -118,7 +170,7 @@ class GuardEngine {
 
         val updatedConfig = config.copy(
             consecutiveFailedAttempts = newFailedCount,
-            lockoutUntilElapsedRealtime = lockoutUntil,
+            lockoutUntilEpochMillis = lockoutUntil,
             failedAttemptHistory = updatedHistory
         )
 
@@ -132,13 +184,19 @@ class GuardEngine {
     fun evaluateRecoveryAttempt(
         enteredCode: CharArray,
         config: GuardConfig,
-        currentElapsedRealtime: Long,
+        nowEpochMillis: Long,
         formattedTime12h: String
     ): Pair<RecoveryResult, GuardConfig> {
+        val clampedLockout = clampLockoutUntilEpoch(
+            config.lockoutUntilEpochMillis,
+            config.consecutiveFailedAttempts,
+            nowEpochMillis
+        )
+
         // 1. Check if currently locked out
-        if (currentElapsedRealtime < config.lockoutUntilElapsedRealtime) {
-            val remainingSec = ((config.lockoutUntilElapsedRealtime - currentElapsedRealtime) / 1000L).coerceAtLeast(1L)
-            return Pair(RecoveryResult.LockedOut(remainingSec), config)
+        if (nowEpochMillis < clampedLockout) {
+            val remainingSec = ((clampedLockout - nowEpochMillis) / 1000L).coerceAtLeast(1L)
+            return Pair(RecoveryResult.LockedOut(remainingSec), config.copy(lockoutUntilEpochMillis = clampedLockout))
         }
 
         // Clean code (normalize uppercase, remove spaces/hyphens)
@@ -148,17 +206,17 @@ class GuardEngine {
         if (isCorrect) {
             val updatedConfig = config.copy(
                 consecutiveFailedAttempts = 0,
-                lockoutUntilElapsedRealtime = 0L
+                lockoutUntilEpochMillis = 0L
             )
             return Pair(RecoveryResult.Success, updatedConfig)
         }
 
         val newFailedCount = config.consecutiveFailedAttempts + 1
         val lockoutSec = computeLockoutSeconds(newFailedCount)
-        val lockoutUntil = if (lockoutSec > 0) currentElapsedRealtime + (lockoutSec * 1000L) else 0L
+        val lockoutUntil = if (lockoutSec > 0) nowEpochMillis + (lockoutSec * 1000L) else 0L
 
         val newHistoryRecord = FailedAttemptRecord(
-            timestampMillis = System.currentTimeMillis(),
+            timestampMillis = nowEpochMillis,
             formattedTime12h = formattedTime12h,
             totalFailedCount = newFailedCount
         )
@@ -166,7 +224,7 @@ class GuardEngine {
 
         val updatedConfig = config.copy(
             consecutiveFailedAttempts = newFailedCount,
-            lockoutUntilElapsedRealtime = lockoutUntil,
+            lockoutUntilEpochMillis = lockoutUntil,
             failedAttemptHistory = updatedHistory
         )
 

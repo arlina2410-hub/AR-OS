@@ -60,7 +60,13 @@ class ArGuardAccessibilityService : AccessibilityService() {
     private var screenOffElapsedRealtime: Long = 0L
     private var isCallActive = false
     private var isSosActive = false
+    private var currentForegroundPackage: String? = null
     private var currentConfig = GuardConfig()
+
+    // Telephony listener references for clean unregistration
+    private var telephonyCallback: TelephonyCallback? = null
+    @Suppress("DEPRECATION")
+    private var phoneStateListener: PhoneStateListener? = null
 
     private val systemReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -99,11 +105,13 @@ class ArGuardAccessibilityService : AccessibilityService() {
 
         val packageName = event.packageName?.toString() ?: ""
         val className = event.className?.toString() ?: ""
+        currentForegroundPackage = packageName
+
+        val nowMillis = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
 
-        // 1. If Learn Mode is active (within 10-minute auto-expiry window), capture observed window
-        if (nowElapsed < currentConfig.learnModeExpiresAtElapsedRealtime) {
-            val nowMillis = System.currentTimeMillis()
+        // 1. If Learn Mode is active (within 10-minute auto-expiry window by wall clock), capture observed window
+        if (nowMillis < currentConfig.learnModeExpiresAtEpochMillis) {
             val formattedTime = TimeFormatter.formatClock(nowMillis, includeSeconds = true)
             guardRepository.recordObservedWindow(
                 ObservedWindow(
@@ -115,14 +123,31 @@ class ArGuardAccessibilityService : AccessibilityService() {
             )
         }
 
-        // 2. Evaluate window against Lost Guard rules
         val isGuardLocked = currentConfig.isConfigured && !guardRepository.isSessionUnlocked.value
+
+        // Prompt 3B: During call or SOS, evaluate whether gate should be visible
+        if (isGuardLocked && (isSosActive || isCallActive)) {
+            val isAllowed = lostGuardRules.isPackageAllowedDuringCallSos(
+                packageName,
+                currentConfig.allowedCallSosPackages
+            )
+            if (isAllowed) {
+                // Allowed package in foreground (InCallUI, Dialer, AR/OS SOS): keep gate hidden
+                overlayManager?.dismissOverlay()
+            } else {
+                // Unallowed package came to front during call/SOS: bring gate back immediately!
+                maybeShowGate()
+            }
+        }
+
+        // 2. Evaluate window against Lost Guard rules
         val action = lostGuardRules.evaluateWindow(
             packageName = packageName,
             className = className,
             isGuardLocked = isGuardLocked,
             isSosActive = isSosActive,
             isCallActive = isCallActive,
+            allowedCallSosPackages = currentConfig.allowedCallSosPackages,
             customBlockedTargets = currentConfig.customBlockedTargets,
             nowElapsed = nowElapsed
         )
@@ -225,17 +250,27 @@ class ArGuardAccessibilityService : AccessibilityService() {
         }
         registerReceiver(systemReceiver, filter)
 
-        // Telephony listener to never block active calls
+        // Telephony listener to monitor call state
         setupTelephonyListener()
 
-        // SOS Controller listener to never block SOS countdown or dialing
+        // SOS Controller listener (monitors countdown or active call)
         sosStateJob = serviceScope.launch {
             sosController.state.collect { sosState ->
                 val active = sosState !is SosState.Idle
                 isSosActive = active
                 if (active) {
-                    overlayManager?.dismissOverlay()
+                    // During active SOS countdown/call: allow AR/OS screen or dialer screen
+                    val isAllowed = lostGuardRules.isPackageAllowedDuringCallSos(
+                        currentForegroundPackage,
+                        currentConfig.allowedCallSosPackages
+                    )
+                    if (isAllowed) {
+                        overlayManager?.dismissOverlay()
+                    } else {
+                        maybeShowGate()
+                    }
                 } else {
+                    // SOS ended -> re-evaluate showing gate
                     maybeShowGate()
                 }
             }
@@ -247,9 +282,10 @@ class ArGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // On service start/reboot, default to locked if configured
+        // Set currentConfig from first() before locking session and showing gate
         serviceScope.launch {
             val config = guardRepository.configFlow.first()
+            currentConfig = config
             if (config.isConfigured) {
                 guardRepository.lockSession()
                 maybeShowGate()
@@ -287,13 +323,20 @@ class ArGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun maybeShowGate() {
-        if (!currentConfig.isConfigured) return
-        if (guardRepository.isSessionUnlocked.value) return
-        if (isSosActive || isCallActive) return
-
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
         val isKeyguardLocked = keyguardManager?.isKeyguardLocked ?: false
-        if (isKeyguardLocked) {
+
+        val shouldShow = lostGuardRules.shouldShowGate(
+            isGuardConfigured = currentConfig.isConfigured,
+            isSessionUnlocked = guardRepository.isSessionUnlocked.value,
+            isKeyguardLocked = isKeyguardLocked,
+            isSosActive = isSosActive,
+            isCallActive = isCallActive,
+            foregroundPackage = currentForegroundPackage,
+            allowedCallSosPackages = currentConfig.allowedCallSosPackages
+        )
+
+        if (!shouldShow) {
             return
         }
 
@@ -317,6 +360,7 @@ class ArGuardAccessibilityService : AccessibilityService() {
                     handleCallState(state)
                 }
             }
+            telephonyCallback = callback
             try {
                 telephonyManager.registerTelephonyCallback(mainExecutor, callback)
             } catch (_: SecurityException) {}
@@ -328,6 +372,7 @@ class ArGuardAccessibilityService : AccessibilityService() {
                     handleCallState(state)
                 }
             }
+            phoneStateListener = listener
             try {
                 @Suppress("DEPRECATION")
                 telephonyManager.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
@@ -339,8 +384,18 @@ class ArGuardAccessibilityService : AccessibilityService() {
         val inCall = state != TelephonyManager.CALL_STATE_IDLE
         isCallActive = inCall
         if (inCall) {
-            overlayManager?.dismissOverlay()
+            // Prompt 3B: If current foreground is an allowed in-call screen, dismiss overlay
+            val isAllowed = lostGuardRules.isPackageAllowedDuringCallSos(
+                currentForegroundPackage,
+                currentConfig.allowedCallSosPackages
+            )
+            if (isAllowed) {
+                overlayManager?.dismissOverlay()
+            } else {
+                maybeShowGate()
+            }
         } else {
+            // Call ended: restore gate if locked
             maybeShowGate()
         }
     }
@@ -356,23 +411,45 @@ class ArGuardAccessibilityService : AccessibilityService() {
             unregisterReceiver(systemReceiver)
         } catch (_: Exception) {}
 
-        serviceScope.cancel()
+        // Unregister telephony callback/listener cleanly
+        val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        if (telephonyManager != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                telephonyCallback?.let {
+                    try {
+                        telephonyManager.unregisterTelephonyCallback(it)
+                    } catch (_: Exception) {}
+                }
+                telephonyCallback = null
+            } else {
+                phoneStateListener?.let {
+                    try {
+                        @Suppress("DEPRECATION")
+                        telephonyManager.listen(it, PhoneStateListener.LISTEN_NONE)
+                    } catch (_: Exception) {}
+                }
+                phoneStateListener = null
+            }
+        }
 
-        if (::guardRepository.isInitialized) {
+        val appContainer = (applicationContext as? ArOsApplication)?.container
+
+        // Log SERVICE_DISABLED using the applicationScope BEFORE serviceScope is cancelled
+        if (::guardRepository.isInitialized && appContainer != null) {
             guardRepository.setServiceConnected(false)
-            serviceScope.launch(Dispatchers.IO) {
+            appContainer.applicationScope.launch(Dispatchers.IO) {
                 guardRepository.logTamperEvent(
                     eventType = "SERVICE_DISABLED",
                     detail = "AR Guard accessibility service stopped or disabled"
                 )
             }
             if (currentConfig.isConfigured) {
-                // Post readiness warning through the existing notifier per spec
                 try {
-                    val container = (applicationContext as ArOsApplication).container
-                    container.notifier.showReadinessWarning(listOf("AR Guard is OFF. Device protection gate is not active."))
+                    appContainer.notifier.showReadinessWarning(listOf("AR Guard is OFF. Device protection gate is not active."))
                 } catch (_: Exception) {}
             }
         }
+
+        serviceScope.cancel()
     }
 }

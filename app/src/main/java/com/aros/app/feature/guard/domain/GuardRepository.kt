@@ -28,6 +28,8 @@ interface GuardRepository {
     suspend fun stopLearnMode()
     suspend fun addCustomBlockedTarget(target: BlockedTarget)
     suspend fun removeCustomBlockedTarget(target: BlockedTarget)
+    suspend fun addAllowedCallSosPackage(packageName: String)
+    suspend fun removeAllowedCallSosPackage(packageName: String)
     suspend fun logTamperEvent(eventType: String, detail: String)
     suspend fun clearTamperLogs()
 

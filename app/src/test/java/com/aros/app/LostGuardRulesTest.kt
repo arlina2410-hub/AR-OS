@@ -1,10 +1,12 @@
 package com.aros.app
 
 import com.aros.app.feature.guard.domain.BlockedTarget
+import com.aros.app.feature.guard.domain.GuardConfig
 import com.aros.app.feature.guard.domain.LostGuardAction
 import com.aros.app.feature.guard.domain.LostGuardRules
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -25,34 +27,6 @@ class LostGuardRulesTest {
             isGuardLocked = false,
             isSosActive = false,
             isCallActive = false,
-            customBlockedTargets = emptyList(),
-            nowElapsed = 1000L
-        )
-        assertEquals(LostGuardAction.NONE, action)
-    }
-
-    @Test
-    fun `when SOS is active - returns NONE even if locked`() {
-        val action = rules.evaluateWindow(
-            packageName = "com.android.systemui",
-            className = "com.android.systemui.globalactions.GlobalActionsDialog",
-            isGuardLocked = true,
-            isSosActive = true,
-            isCallActive = false,
-            customBlockedTargets = emptyList(),
-            nowElapsed = 1000L
-        )
-        assertEquals(LostGuardAction.NONE, action)
-    }
-
-    @Test
-    fun `when regular phone call is active - returns NONE even if locked`() {
-        val action = rules.evaluateWindow(
-            packageName = "com.android.settings",
-            className = "com.android.settings.Settings",
-            isGuardLocked = true,
-            isSosActive = false,
-            isCallActive = true,
             customBlockedTargets = emptyList(),
             nowElapsed = 1000L
         )
@@ -173,5 +147,167 @@ class LostGuardRulesTest {
             nowElapsed = 2000L
         )
         assertEquals(LostGuardAction.GO_HOME, action)
+    }
+
+    // --- Prompt 3B: Call / SOS Hole Protection Tests ---
+
+    @Test
+    fun `allowed package during call keeps gate hidden and rules suspended`() {
+        val allowedPackages = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES // contains com.android.incallui
+
+        // 1. shouldShowGate returns false for allowed in-call screen
+        val showGate = rules.shouldShowGate(
+            isGuardConfigured = true,
+            isSessionUnlocked = false,
+            isKeyguardLocked = false,
+            isSosActive = false,
+            isCallActive = true,
+            foregroundPackage = "com.android.incallui",
+            allowedCallSosPackages = allowedPackages
+        )
+        assertFalse(showGate)
+
+        // 2. evaluateWindow returns NONE for allowed in-call screen
+        val action = rules.evaluateWindow(
+            packageName = "com.android.incallui",
+            className = "com.android.incallui.InCallActivity",
+            isGuardLocked = true,
+            isSosActive = false,
+            isCallActive = true,
+            allowedCallSosPackages = allowedPackages,
+            nowElapsed = 1000L
+        )
+        assertEquals(LostGuardAction.NONE, action)
+    }
+
+    @Test
+    fun `unknown package during call shows gate and applies Lost Guard rules`() {
+        val allowedPackages = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES
+
+        // 1. shouldShowGate returns true if user/thief switches to Settings or launcher during a call
+        val showGate = rules.shouldShowGate(
+            isGuardConfigured = true,
+            isSessionUnlocked = false,
+            isKeyguardLocked = false,
+            isSosActive = false,
+            isCallActive = true,
+            foregroundPackage = "com.android.settings",
+            allowedCallSosPackages = allowedPackages
+        )
+        assertTrue(showGate)
+
+        // 2. evaluateWindow intercepts Settings during a call and redirects to GO_HOME
+        val actionSettings = rules.evaluateWindow(
+            packageName = "com.android.settings",
+            className = "com.android.settings.Settings",
+            isGuardLocked = true,
+            isSosActive = false,
+            isCallActive = true,
+            allowedCallSosPackages = allowedPackages,
+            nowElapsed = 1000L
+        )
+        assertEquals(LostGuardAction.GO_HOME, actionSettings)
+
+        // 3. Quick settings shade pulled down during a call is closed
+        val actionShade = rules.evaluateWindow(
+            packageName = "com.android.systemui",
+            className = "com.android.systemui.shade.NotificationShadeWindowView",
+            isGuardLocked = true,
+            isSosActive = false,
+            isCallActive = true,
+            allowedCallSosPackages = allowedPackages,
+            nowElapsed = 2000L
+        )
+        assertEquals(LostGuardAction.DISMISS_NOTIFICATION_SHADE, actionShade)
+    }
+
+    @Test
+    fun `user-added allowed package keeps gate hidden during call`() {
+        // e.g., Moto G57 Power proprietary dialer
+        val customAllowed = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES + "com.motorola.phone"
+
+        val showGate = rules.shouldShowGate(
+            isGuardConfigured = true,
+            isSessionUnlocked = false,
+            isKeyguardLocked = false,
+            isSosActive = false,
+            isCallActive = true,
+            foregroundPackage = "com.motorola.phone",
+            allowedCallSosPackages = customAllowed
+        )
+        assertFalse(showGate)
+
+        val action = rules.evaluateWindow(
+            packageName = "com.motorola.phone",
+            className = "com.motorola.phone.CallScreen",
+            isGuardLocked = true,
+            isSosActive = false,
+            isCallActive = true,
+            allowedCallSosPackages = customAllowed,
+            nowElapsed = 1000L
+        )
+        assertEquals(LostGuardAction.NONE, action)
+    }
+
+    @Test
+    fun `when call ends - gate returns if phone is unlocked and session is locked`() {
+        val allowedPackages = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES
+
+        // During call on allowed screen: false
+        assertFalse(
+            rules.shouldShowGate(
+                isGuardConfigured = true,
+                isSessionUnlocked = false,
+                isKeyguardLocked = false,
+                isSosActive = false,
+                isCallActive = true,
+                foregroundPackage = "com.android.incallui",
+                allowedCallSosPackages = allowedPackages
+            )
+        )
+
+        // Call ends (isCallActive = false): gate must show!
+        assertTrue(
+            rules.shouldShowGate(
+                isGuardConfigured = true,
+                isSessionUnlocked = false,
+                isKeyguardLocked = false,
+                isSosActive = false,
+                isCallActive = false,
+                foregroundPackage = "com.android.incallui",
+                allowedCallSosPackages = allowedPackages
+            )
+        )
+    }
+
+    @Test
+    fun `allowed AR OS screen during SOS countdown stays visible but switching away brings gate back`() {
+        val allowedPackages = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES // contains com.aistudio.aros.kpxwzm
+
+        // AR/OS SOS screen is allowed
+        assertFalse(
+            rules.shouldShowGate(
+                isGuardConfigured = true,
+                isSessionUnlocked = false,
+                isKeyguardLocked = false,
+                isSosActive = true,
+                isCallActive = false,
+                foregroundPackage = "com.aistudio.aros.kpxwzm",
+                allowedCallSosPackages = allowedPackages
+            )
+        )
+
+        // If user navigates away to YouTube or Browser during SOS, gate must show
+        assertTrue(
+            rules.shouldShowGate(
+                isGuardConfigured = true,
+                isSessionUnlocked = false,
+                isKeyguardLocked = false,
+                isSosActive = true,
+                isCallActive = false,
+                foregroundPackage = "com.google.android.youtube",
+                allowedCallSosPackages = allowedPackages
+            )
+        )
     }
 }

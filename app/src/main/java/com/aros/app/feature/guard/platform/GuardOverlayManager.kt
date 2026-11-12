@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.WindowManager
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -22,7 +23,6 @@ import com.aros.app.designsystem.theme.ArOsTheme
 import com.aros.app.feature.guard.domain.GuardRepository
 import com.aros.app.feature.guard.ui.GuardGateOverlayView
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 class OverlayLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -75,7 +75,8 @@ class GuardOverlayManager(
             val owner = OverlayLifecycleOwner()
             lifecycleOwner = owner
 
-            var testRemainingSec = 20
+            // Fix 5.1: testRemainingSec as mutableIntStateOf so Compose updates countdown text
+            val testRemainingSecState = mutableIntStateOf(20)
 
             val composeView = ComposeView(context).apply {
                 owner.attachTo(this)
@@ -83,12 +84,15 @@ class GuardOverlayManager(
                     ArOsTheme {
                         GuardGateOverlayView(
                             isTestMode = isTestMode,
-                            testRemainingSeconds = testRemainingSec,
+                            testRemainingSeconds = testRemainingSecState.intValue,
                             onVerifyPin = { pin ->
                                 guardRepository.verifyPin(pin)
                             },
                             onVerifyRecovery = { code ->
                                 guardRepository.verifyRecoveryCode(code)
+                            },
+                            onResetPinWithRecovery = { code, newPin ->
+                                guardRepository.resetPinWithRecoveryCode(code, newPin)
                             },
                             onSuccessUnlock = {
                                 dismissOverlay()
@@ -119,8 +123,8 @@ class GuardOverlayManager(
             if (isTestMode) {
                 testDismissRunnable = object : Runnable {
                     override fun run() {
-                        testRemainingSec--
-                        if (testRemainingSec <= 0) {
+                        testRemainingSecState.intValue -= 1
+                        if (testRemainingSecState.intValue <= 0) {
                             dismissOverlay()
                         } else {
                             mainHandler.postDelayed(this, 1000L)

@@ -435,7 +435,7 @@ fun GuardScreen(
                                     style = ArOsTheme.typography.headline,
                                     color = ArOsTheme.colors.contentPrimary
                                 )
-                                val isLearnActive = SystemClock.elapsedRealtime() < config.learnModeExpiresAtElapsedRealtime
+                                val isLearnActive = System.currentTimeMillis() < config.learnModeExpiresAtEpochMillis
                                 if (isLearnActive) {
                                     ArOsStatusPill(label = "LEARN ON", tone = ArOsPillTone.Warning)
                                 }
@@ -447,10 +447,17 @@ fun GuardScreen(
                                 color = ArOsTheme.colors.contentSecondary,
                                 lineHeight = 18.sp
                             )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "During calls and SOS, only the call screen and the SOS screen stay open. Anything else brings the gate back.",
+                                style = ArOsTheme.typography.footnote,
+                                color = ArOsTheme.colors.accent,
+                                lineHeight = 18.sp
+                            )
                             Spacer(modifier = Modifier.height(12.dp))
                             ArOsRow(
                                 title = "Open Guard Lab (Window Inspector)",
-                                subtitle = "Observe system window events & block custom screens",
+                                subtitle = "Observe window events, block targets & manage call screens",
                                 onClick = onNavigateToLab
                             )
                         }

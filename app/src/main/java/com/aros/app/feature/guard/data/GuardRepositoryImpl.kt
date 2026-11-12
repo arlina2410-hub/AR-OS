@@ -1,7 +1,6 @@
 package com.aros.app.feature.guard.data
 
 import android.content.Context
-import android.os.SystemClock
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -32,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Base64
 
@@ -52,10 +52,18 @@ class GuardRepositoryImpl(
         val RELOCK_DELAY_SECONDS = longPreferencesKey("guard_relock_delay_seconds")
         val GO_TO_HOME_ON_LOCK = booleanPreferencesKey("guard_go_to_home_on_lock")
         val FAILED_ATTEMPTS = intPreferencesKey("guard_failed_attempts")
-        val LOCKOUT_UNTIL_ELAPSED = longPreferencesKey("guard_lockout_until_elapsed")
+
+        // NEW epoch-based keys per Fix 2
+        val LOCKOUT_UNTIL_EPOCH = longPreferencesKey("guard_lockout_until_epoch")
+        val LEARN_EXPIRES_EPOCH = longPreferencesKey("guard_learn_expires_epoch")
+
+        // Old keys to ignore and clean up
+        val LEGACY_LOCKOUT_UNTIL_ELAPSED = longPreferencesKey("guard_lockout_until_elapsed")
+        val LEGACY_LEARN_MODE_EXPIRES_ELAPSED = longPreferencesKey("guard_learn_mode_expires_elapsed")
+
         val FAILED_HISTORY_RAW = stringPreferencesKey("guard_failed_history_raw")
-        val LEARN_MODE_EXPIRES_ELAPSED = longPreferencesKey("guard_learn_mode_expires_elapsed")
         val CUSTOM_BLOCKED_RAW = stringPreferencesKey("guard_custom_blocked_raw")
+        val ALLOWED_CALL_SOS_RAW = stringPreferencesKey("guard_allowed_call_sos_raw")
         val TAMPER_LOGS_RAW = stringPreferencesKey("guard_tamper_logs_raw")
     }
 
@@ -72,6 +80,22 @@ class GuardRepositoryImpl(
     private val _observedWindows = MutableStateFlow<List<ObservedWindow>>(emptyList())
     override val observedWindows: StateFlow<List<ObservedWindow>> = _observedWindows.asStateFlow()
 
+    init {
+        // Proactively clean up legacy elapsed keys so they cannot pollute DataStore
+        scope.launch {
+            try {
+                context.guardDataStore.edit { prefs ->
+                    if (prefs.contains(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)) {
+                        prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
+                    }
+                    if (prefs.contains(Keys.LEGACY_LEARN_MODE_EXPIRES_ELAPSED)) {
+                        prefs.remove(Keys.LEGACY_LEARN_MODE_EXPIRES_ELAPSED)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     override val configFlow: Flow<GuardConfig> = context.guardDataStore.data.map { prefs ->
         try {
             val configured = prefs[Keys.IS_CONFIGURED] ?: false
@@ -81,14 +105,26 @@ class GuardRepositoryImpl(
             val relockDelay = prefs[Keys.RELOCK_DELAY_SECONDS] ?: 0L
             val goToHome = prefs[Keys.GO_TO_HOME_ON_LOCK] ?: true
             val failed = prefs[Keys.FAILED_ATTEMPTS] ?: 0
-            val lockout = prefs[Keys.LOCKOUT_UNTIL_ELAPSED] ?: 0L
+
+            val rawLockoutEpoch = prefs[Keys.LOCKOUT_UNTIL_EPOCH] ?: 0L
+            val rawLearnEpoch = prefs[Keys.LEARN_EXPIRES_EPOCH] ?: 0L
+
+            val now = System.currentTimeMillis()
+            val clampedLockout = guardEngine.clampLockoutUntilEpoch(rawLockoutEpoch, failed, now)
+            val clampedLearn = guardEngine.clampLearnModeExpiresEpoch(rawLearnEpoch, now)
+
             val historyRaw = prefs[Keys.FAILED_HISTORY_RAW] ?: ""
-            val learnExpires = prefs[Keys.LEARN_MODE_EXPIRES_ELAPSED] ?: 0L
             val customBlockedRaw = prefs[Keys.CUSTOM_BLOCKED_RAW] ?: ""
+            val allowedCallSosRaw = prefs[Keys.ALLOWED_CALL_SOS_RAW]
             val tamperRaw = prefs[Keys.TAMPER_LOGS_RAW] ?: ""
 
             val history = parseHistory(historyRaw)
             val customBlocked = parseCustomBlocked(customBlockedRaw)
+            val allowedCallSos = if (allowedCallSosRaw == null) {
+                GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES
+            } else {
+                parseAllowedCallSos(allowedCallSosRaw)
+            }
             val tamperLogs = parseTamperLogs(tamperRaw)
 
             GuardConfig(
@@ -99,10 +135,11 @@ class GuardRepositoryImpl(
                 relockDelaySeconds = relockDelay,
                 goToHomeOnLock = goToHome,
                 consecutiveFailedAttempts = failed,
-                lockoutUntilElapsedRealtime = lockout,
+                lockoutUntilEpochMillis = clampedLockout,
                 failedAttemptHistory = history,
                 customBlockedTargets = customBlocked,
-                learnModeExpiresAtElapsedRealtime = learnExpires,
+                allowedCallSosPackages = allowedCallSos,
+                learnModeExpiresAtEpochMillis = clampedLearn,
                 tamperLogs = tamperLogs
             )
         } catch (_: Exception) {
@@ -189,15 +226,17 @@ class GuardRepositoryImpl(
     }
 
     override suspend fun startLearnMode(durationMinutes: Int) {
-        val expiresAt = SystemClock.elapsedRealtime() + (durationMinutes * 60 * 1000L)
+        val expiresAt = System.currentTimeMillis() + (durationMinutes * 60 * 1000L)
         context.guardDataStore.edit { prefs ->
-            prefs[Keys.LEARN_MODE_EXPIRES_ELAPSED] = expiresAt
+            prefs[Keys.LEARN_EXPIRES_EPOCH] = expiresAt
+            prefs.remove(Keys.LEGACY_LEARN_MODE_EXPIRES_ELAPSED)
         }
     }
 
     override suspend fun stopLearnMode() {
         context.guardDataStore.edit { prefs ->
-            prefs[Keys.LEARN_MODE_EXPIRES_ELAPSED] = 0L
+            prefs[Keys.LEARN_EXPIRES_EPOCH] = 0L
+            prefs.remove(Keys.LEGACY_LEARN_MODE_EXPIRES_ELAPSED)
         }
     }
 
@@ -219,9 +258,48 @@ class GuardRepositoryImpl(
         }
     }
 
+    private fun parseAllowedCallSos(raw: String): List<String> {
+        if (raw.isBlank()) return GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES
+        return raw.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
+    private fun serializeAllowedCallSos(packages: List<String>): String {
+        return packages.joinToString("\n")
+    }
+
+    override suspend fun addAllowedCallSosPackage(packageName: String) {
+        val clean = packageName.trim()
+        if (clean.isBlank()) return
+        val current = configSnapshot.value.allowedCallSosPackages.toMutableList()
+        if (!current.any { it.equals(clean, ignoreCase = true) }) {
+            current.add(clean)
+            context.guardDataStore.edit { prefs ->
+                prefs[Keys.ALLOWED_CALL_SOS_RAW] = serializeAllowedCallSos(current)
+            }
+        }
+    }
+
+    override suspend fun removeAllowedCallSosPackage(packageName: String) {
+        val clean = packageName.trim()
+        val current = configSnapshot.value.allowedCallSosPackages.toMutableList()
+        current.removeAll { it.equals(clean, ignoreCase = true) }
+        context.guardDataStore.edit { prefs ->
+            prefs[Keys.ALLOWED_CALL_SOS_RAW] = serializeAllowedCallSos(current)
+        }
+    }
+
     override suspend fun logTamperEvent(eventType: String, detail: String) {
         val current = configSnapshot.value.tamperLogs.toMutableList()
         val now = System.currentTimeMillis()
+
+        // Fix 5.2: skip writing a new entry when the same eventType and detail were already written within 10 seconds
+        val recentDuplicate = current.firstOrNull {
+            it.eventType == eventType && it.detail == detail && (now - it.timestampMillis) < 10_000L
+        }
+        if (recentDuplicate != null) {
+            return
+        }
+
         val formattedTime = TimeFormatter.formatClock(now, includeSeconds = true)
         val entry = TamperLogEntry(
             id = now,
@@ -262,7 +340,8 @@ class GuardRepositoryImpl(
             prefs[Keys.SALT] = saltBase64
             prefs[Keys.RECOVERY_HASH] = recoveryHashBase64
             prefs[Keys.FAILED_ATTEMPTS] = 0
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = 0L
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = 0L
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
         }
         _isSessionUnlocked.value = true
         true
@@ -291,7 +370,8 @@ class GuardRepositoryImpl(
         context.guardDataStore.edit { prefs ->
             prefs[Keys.PIN_HASH] = newPinHashBase64
             prefs[Keys.FAILED_ATTEMPTS] = 0
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = 0L
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = 0L
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
         }
         true
     }
@@ -312,7 +392,8 @@ class GuardRepositoryImpl(
             prefs[Keys.PIN_HASH] = ""
             prefs[Keys.RECOVERY_HASH] = ""
             prefs[Keys.FAILED_ATTEMPTS] = 0
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = 0L
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = 0L
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
         }
         _isSessionUnlocked.value = true
         true
@@ -323,19 +404,20 @@ class GuardRepositoryImpl(
         if (!currentConfig.isConfigured) return@withContext false
         if (!guardEngine.validatePinFormat(newPin)) return@withContext false
 
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val formattedTime = TimeFormatter.formatClock(System.currentTimeMillis(), includeSeconds = false)
+        val now = System.currentTimeMillis()
+        val formattedTime = TimeFormatter.formatClock(now, includeSeconds = false)
         val (recResult, updatedConfig) = guardEngine.evaluateRecoveryAttempt(
             code.toCharArray(),
             currentConfig,
-            nowElapsed,
+            now,
             formattedTime
         )
 
         // Persist attempt updates
         context.guardDataStore.edit { prefs ->
             prefs[Keys.FAILED_ATTEMPTS] = updatedConfig.consecutiveFailedAttempts
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = updatedConfig.lockoutUntilElapsedRealtime
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = updatedConfig.lockoutUntilEpochMillis
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
             prefs[Keys.FAILED_HISTORY_RAW] = serializeHistory(updatedConfig.failedAttemptHistory)
         }
 
@@ -351,7 +433,8 @@ class GuardRepositoryImpl(
         context.guardDataStore.edit { prefs ->
             prefs[Keys.PIN_HASH] = newPinHashBase64
             prefs[Keys.FAILED_ATTEMPTS] = 0
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = 0L
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = 0L
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
         }
         _isSessionUnlocked.value = true
         true
@@ -359,19 +442,20 @@ class GuardRepositoryImpl(
 
     override suspend fun verifyPin(pin: String): VerifyResult = withContext(cryptoDispatcher) {
         val currentConfig = configSnapshot.value
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val formattedTime = TimeFormatter.formatClock(System.currentTimeMillis(), includeSeconds = false)
+        val now = System.currentTimeMillis()
+        val formattedTime = TimeFormatter.formatClock(now, includeSeconds = false)
 
         val (result, updatedConfig) = guardEngine.evaluatePinAttempt(
             pin.toCharArray(),
             currentConfig,
-            nowElapsed,
+            now,
             formattedTime
         )
 
         context.guardDataStore.edit { prefs ->
             prefs[Keys.FAILED_ATTEMPTS] = updatedConfig.consecutiveFailedAttempts
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = updatedConfig.lockoutUntilElapsedRealtime
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = updatedConfig.lockoutUntilEpochMillis
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
             prefs[Keys.FAILED_HISTORY_RAW] = serializeHistory(updatedConfig.failedAttemptHistory)
         }
 
@@ -384,19 +468,20 @@ class GuardRepositoryImpl(
 
     override suspend fun verifyRecoveryCode(code: String): RecoveryResult = withContext(cryptoDispatcher) {
         val currentConfig = configSnapshot.value
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val formattedTime = TimeFormatter.formatClock(System.currentTimeMillis(), includeSeconds = false)
+        val now = System.currentTimeMillis()
+        val formattedTime = TimeFormatter.formatClock(now, includeSeconds = false)
 
         val (result, updatedConfig) = guardEngine.evaluateRecoveryAttempt(
             code.toCharArray(),
             currentConfig,
-            nowElapsed,
+            now,
             formattedTime
         )
 
         context.guardDataStore.edit { prefs ->
             prefs[Keys.FAILED_ATTEMPTS] = updatedConfig.consecutiveFailedAttempts
-            prefs[Keys.LOCKOUT_UNTIL_ELAPSED] = updatedConfig.lockoutUntilElapsedRealtime
+            prefs[Keys.LOCKOUT_UNTIL_EPOCH] = updatedConfig.lockoutUntilEpochMillis
+            prefs.remove(Keys.LEGACY_LOCKOUT_UNTIL_ELAPSED)
             prefs[Keys.FAILED_HISTORY_RAW] = serializeHistory(updatedConfig.failedAttemptHistory)
         }
 

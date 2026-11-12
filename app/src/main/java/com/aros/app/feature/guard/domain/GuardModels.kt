@@ -60,12 +60,23 @@ data class GuardConfig(
     val relockDelaySeconds: Long = 0L,
     val goToHomeOnLock: Boolean = true,
     val consecutiveFailedAttempts: Int = 0,
-    val lockoutUntilElapsedRealtime: Long = 0L,
+    val lockoutUntilEpochMillis: Long = 0L,
     val failedAttemptHistory: List<FailedAttemptRecord> = emptyList(),
     val customBlockedTargets: List<BlockedTarget> = emptyList(),
-    val learnModeExpiresAtElapsedRealtime: Long = 0L,
+    val allowedCallSosPackages: List<String> = DEFAULT_ALLOWED_CALL_SOS_PACKAGES,
+    val learnModeExpiresAtEpochMillis: Long = 0L,
     val tamperLogs: List<TamperLogEntry> = emptyList()
-)
+) {
+    companion object {
+        val DEFAULT_ALLOWED_CALL_SOS_PACKAGES = listOf(
+            "com.aistudio.aros.kpxwzm",
+            "com.android.incallui",
+            "com.android.dialer",
+            "com.google.android.dialer",
+            "com.android.server.telecom"
+        )
+    }
+}
 
 sealed class VerifyResult {
     object Success : VerifyResult()

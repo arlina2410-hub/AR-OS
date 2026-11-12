@@ -1,6 +1,5 @@
 package com.aros.app.feature.guard.ui
 
-import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,10 +58,10 @@ fun GuardLabScreen(
     val observedWindows by guardRepository.observedWindows.collectAsState()
     val scope = rememberCoroutineScope()
 
-    val nowElapsed = SystemClock.elapsedRealtime()
-    val isLearnModeActive = nowElapsed < config.learnModeExpiresAtElapsedRealtime
+    val nowMillis = System.currentTimeMillis()
+    val isLearnModeActive = nowMillis < config.learnModeExpiresAtEpochMillis
     val remainingSeconds = if (isLearnModeActive) {
-        ((config.learnModeExpiresAtElapsedRealtime - nowElapsed) / 1000L).coerceAtLeast(0L)
+        ((config.learnModeExpiresAtEpochMillis - nowMillis) / 1000L).coerceAtLeast(0L)
     } else 0L
 
     ArOsScreenScaffold(
@@ -140,6 +139,72 @@ fun GuardLabScreen(
                                 leadingIcon = Icons.Default.Stop,
                                 modifier = Modifier.fillMaxWidth().testTag("stop_learn_mode_button")
                             )
+                        }
+                    }
+                }
+            }
+
+            // Prompt 3B: Allowed During Calls / SOS Section
+            item {
+                ArOsCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Allowed During Calls & SOS (${config.allowedCallSosPackages.size})",
+                            style = ArOsTheme.typography.headline,
+                            color = ArOsTheme.colors.contentPrimary
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Only these packages can stay open while a call or SOS is active. Leaving them immediately brings the AR Guard gate back.",
+                            style = ArOsTheme.typography.caption,
+                            color = ArOsTheme.colors.contentSecondary,
+                            lineHeight = 18.sp
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            config.allowedCallSosPackages.forEach { pkg ->
+                                val isDefault = GuardConfig.DEFAULT_ALLOWED_CALL_SOS_PACKAGES.contains(pkg)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            ArOsTheme.colors.surfaceRaised,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = pkg,
+                                            style = ArOsTheme.typography.body,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = ArOsTheme.colors.contentPrimary
+                                        )
+                                        Text(
+                                            text = if (isDefault) "Default allowed dialer/SOS package" else "User-allowed call screen",
+                                            style = ArOsTheme.typography.caption,
+                                            color = if (isDefault) ArOsTheme.colors.accent else ArOsTheme.colors.contentSecondary
+                                        )
+                                    }
+                                    if (!isDefault) {
+                                        IconButton(
+                                            onClick = {
+                                                scope.launch {
+                                                    guardRepository.removeAllowedCallSosPackage(pkg)
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "Remove package",
+                                                tint = ArOsTheme.colors.sosCritical
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -240,12 +305,18 @@ fun GuardLabScreen(
                 }
             } else {
                 items(observedWindows) { window ->
+                    val isAlreadyBlocked = config.customBlockedTargets.any {
+                        it.packageName == window.packageName &&
+                            (it.className.isBlank() || it.className == window.className)
+                    }
+                    val isAlreadyAllowed = config.allowedCallSosPackages.any {
+                        it.equals(window.packageName, ignoreCase = true)
+                    }
+
                     ObservedWindowCard(
                         window = window,
-                        isAlreadyBlocked = config.customBlockedTargets.any {
-                            it.packageName == window.packageName &&
-                                (it.className.isBlank() || it.className == window.className)
-                        },
+                        isAlreadyBlocked = isAlreadyBlocked,
+                        isAlreadyAllowed = isAlreadyAllowed,
                         onBlock = {
                             scope.launch {
                                 guardRepository.addCustomBlockedTarget(
@@ -255,6 +326,11 @@ fun GuardLabScreen(
                                         label = window.packageName
                                     )
                                 )
+                            }
+                        },
+                        onAllowCallSos = {
+                            scope.launch {
+                                guardRepository.addAllowedCallSosPackage(window.packageName)
                             }
                         }
                     )
@@ -268,7 +344,9 @@ fun GuardLabScreen(
 private fun ObservedWindowCard(
     window: ObservedWindow,
     isAlreadyBlocked: Boolean,
-    onBlock: () -> Unit
+    isAlreadyAllowed: Boolean,
+    onBlock: () -> Unit,
+    onAllowCallSos: () -> Unit
 ) {
     ArOsCard {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -282,8 +360,13 @@ private fun ObservedWindowCard(
                     style = ArOsTheme.typography.caption,
                     color = ArOsTheme.colors.accent
                 )
-                if (isAlreadyBlocked) {
-                    ArOsStatusPill(label = "BLOCKED", tone = ArOsPillTone.Danger)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isAlreadyAllowed) {
+                        ArOsStatusPill(label = "CALL/SOS ALLOWED", tone = ArOsPillTone.Success)
+                    }
+                    if (isAlreadyBlocked) {
+                        ArOsStatusPill(label = "BLOCKED", tone = ArOsPillTone.Danger)
+                    }
                 }
             }
             Spacer(Modifier.height(6.dp))
@@ -302,13 +385,26 @@ private fun ObservedWindowCard(
                 )
             }
             Spacer(Modifier.height(10.dp))
-            if (!isAlreadyBlocked) {
-                ArOsButton(
-                    text = "Block this window while locked",
-                    onClick = onBlock,
-                    variant = ArOsButtonVariant.Secondary,
-                    modifier = Modifier.fillMaxWidth()
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!isAlreadyBlocked) {
+                    ArOsButton(
+                        text = "Block while locked",
+                        onClick = onBlock,
+                        variant = ArOsButtonVariant.Secondary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (!isAlreadyAllowed) {
+                    ArOsButton(
+                        text = "Allow in calls / SOS",
+                        onClick = onAllowCallSos,
+                        variant = ArOsButtonVariant.Secondary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }

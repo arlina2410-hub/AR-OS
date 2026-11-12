@@ -65,10 +65,10 @@ class GuardEngineTest {
             saltBase64 = saltBase64
         )
 
-        var elapsed = 100_000L
+        val now = 1_700_000_000_000L
 
         // 1st wrong try
-        val (res1, cfg1) = engine.evaluatePinAttempt("000000".toCharArray(), config, elapsed, "12:00 PM")
+        val (res1, cfg1) = engine.evaluatePinAttempt("000000".toCharArray(), config, now, "12:00 PM")
         assertTrue(res1 is VerifyResult.WrongPin)
         assertEquals(4, (res1 as VerifyResult.WrongPin).remainingFreeAttempts)
         assertEquals(0L, res1.lockoutSeconds)
@@ -76,28 +76,28 @@ class GuardEngineTest {
 
         // 2nd through 5th wrong tries
         for (i in 2..5) {
-            val (_, nextCfg) = engine.evaluatePinAttempt("000000".toCharArray(), config, elapsed, "12:00 PM")
+            val (_, nextCfg) = engine.evaluatePinAttempt("000000".toCharArray(), config, now, "12:00 PM")
             config = nextCfg
         }
         assertEquals(5, config.consecutiveFailedAttempts)
 
         // 6th wrong try -> triggers 30s lockout
-        val (res6, cfg6) = engine.evaluatePinAttempt("000000".toCharArray(), config, elapsed, "12:00 PM")
+        val (res6, cfg6) = engine.evaluatePinAttempt("000000".toCharArray(), config, now, "12:00 PM")
         assertTrue(res6 is VerifyResult.WrongPin)
         assertEquals(30L, (res6 as VerifyResult.WrongPin).lockoutSeconds)
-        assertEquals(elapsed + 30_000L, cfg6.lockoutUntilElapsedRealtime)
+        assertEquals(now + 30_000L, cfg6.lockoutUntilEpochMillis)
         config = cfg6
 
         // Attempt during active lockout is rejected with LockedOut
-        val (resLocked, _) = engine.evaluatePinAttempt(pin.toCharArray(), config, elapsed + 10_000L, "12:00 PM")
+        val (resLocked, _) = engine.evaluatePinAttempt(pin.toCharArray(), config, now + 10_000L, "12:00 PM")
         assertTrue(resLocked is VerifyResult.LockedOut)
         assertEquals(20L, (resLocked as VerifyResult.LockedOut).remainingLockoutSeconds)
 
         // After lockout expires, entering correct PIN succeeds and resets consecutive failed attempts
-        val (resSuccess, cfgSuccess) = engine.evaluatePinAttempt(pin.toCharArray(), config, elapsed + 31_000L, "12:01 PM")
+        val (resSuccess, cfgSuccess) = engine.evaluatePinAttempt(pin.toCharArray(), config, now + 31_000L, "12:01 PM")
         assertTrue(resSuccess is VerifyResult.Success)
         assertEquals(0, cfgSuccess.consecutiveFailedAttempts)
-        assertEquals(0L, cfgSuccess.lockoutUntilElapsedRealtime)
+        assertEquals(0L, cfgSuccess.lockoutUntilEpochMillis)
     }
 
     @Test
@@ -122,11 +122,11 @@ class GuardEngineTest {
 
         // Entering with formatting dashes and lowercase should succeed
         val formattedEntered = code.lowercase().chunked(4).joinToString("-")
-        val (recResult, _) = engine.evaluateRecoveryAttempt(formattedEntered.toCharArray(), config, 50_000L, "12:00 PM")
+        val (recResult, _) = engine.evaluateRecoveryAttempt(formattedEntered.toCharArray(), config, 1_700_000_000_000L, "12:00 PM")
         assertTrue(recResult is RecoveryResult.Success)
 
         // Wrong recovery code fails
-        val (recWrong, _) = engine.evaluateRecoveryAttempt("WRONGCODE1234567".toCharArray(), config, 50_000L, "12:00 PM")
+        val (recWrong, _) = engine.evaluateRecoveryAttempt("WRONGCODE1234567".toCharArray(), config, 1_700_000_000_000L, "12:00 PM")
         assertTrue(recWrong is RecoveryResult.WrongCode)
     }
 
@@ -146,5 +146,76 @@ class GuardEngineTest {
         // 2 min delay (120s)
         assertFalse(engine.shouldRelockAfterScreenOff(screenOff, 100_000L + 60_000L, 120L))
         assertTrue(engine.shouldRelockAfterScreenOff(screenOff, 100_000L + 120_000L, 120L))
+    }
+
+    // --- Fix 2 Required New Tests ---
+
+    @Test
+    fun `normal lockout countdown decrements remaining time`() {
+        val now = 1_700_000_000_000L
+        val lockoutUntil = now + 30_000L
+        val config = GuardConfig(
+            isConfigured = true,
+            consecutiveFailedAttempts = 6,
+            lockoutUntilEpochMillis = lockoutUntil
+        )
+
+        val (res10s, _) = engine.evaluatePinAttempt("123456".toCharArray(), config, now + 10_000L, "12:00 PM")
+        assertTrue(res10s is VerifyResult.LockedOut)
+        assertEquals(20L, (res10s as VerifyResult.LockedOut).remainingLockoutSeconds)
+
+        val (res25s, _) = engine.evaluatePinAttempt("123456".toCharArray(), config, now + 25_000L, "12:00 PM")
+        assertTrue(res25s is VerifyResult.LockedOut)
+        assertEquals(5L, (res25s as VerifyResult.LockedOut).remainingLockoutSeconds)
+    }
+
+    @Test
+    fun `stored far-future lockout value is clamped to current failed attempts maximum`() {
+        val now = 1_700_000_000_000L
+        // Simulating reboot where an old elapsedRealtime or far-future time was stored (e.g. 10 days in future)
+        val corruptedFarFutureEpoch = now + (10L * 24 * 3600 * 1000L)
+
+        // For 6 failed attempts, maximum delay is 30 seconds
+        val clamped6 = engine.clampLockoutUntilEpoch(corruptedFarFutureEpoch, 6, now)
+        assertEquals(now + 30_000L, clamped6)
+
+        // For 7 failed attempts, maximum delay is 60 seconds
+        val clamped7 = engine.clampLockoutUntilEpoch(corruptedFarFutureEpoch, 7, now)
+        assertEquals(now + 60_000L, clamped7)
+
+        // For 10 failed attempts, maximum delay is 3600 seconds (1 hour)
+        val clamped10 = engine.clampLockoutUntilEpoch(corruptedFarFutureEpoch, 10, now)
+        assertEquals(now + 3600_000L, clamped10)
+
+        // Normal valid lockout is not clamped
+        val validLockout = now + 15_000L
+        val notClamped = engine.clampLockoutUntilEpoch(validLockout, 6, now)
+        assertEquals(validLockout, notClamped)
+
+        // Past lockout returns 0 (expired)
+        assertEquals(0L, engine.clampLockoutUntilEpoch(now - 5000L, 6, now))
+    }
+
+    @Test
+    fun `learn mode expires after 10 minutes`() {
+        val now = 1_700_000_000_000L
+        val validLearnEpoch = now + (10 * 60 * 1000L) // exactly 10 min
+
+        val active = engine.clampLearnModeExpiresEpoch(validLearnEpoch, now)
+        assertEquals(validLearnEpoch, active)
+
+        // After 10 minutes + 1 second, it is expired
+        val expired = engine.clampLearnModeExpiresEpoch(validLearnEpoch, now + (10 * 60 * 1000L) + 1000L)
+        assertEquals(0L, expired)
+    }
+
+    @Test
+    fun `learn mode with far-future stored value is treated as expired`() {
+        val now = 1_700_000_000_000L
+        // Stored value exceeds 10 minutes (e.g. days in future from reboot error)
+        val corruptedLearnEpoch = now + (15 * 60 * 1000L) // 15 min > 10 min
+
+        val clamped = engine.clampLearnModeExpiresEpoch(corruptedLearnEpoch, now)
+        assertEquals(0L, clamped) // Treated as expired
     }
 }
